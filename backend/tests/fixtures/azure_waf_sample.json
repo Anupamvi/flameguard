@@ -1,0 +1,290 @@
+{
+  "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/waf-policy-prod-appgw",
+  "name": "waf-policy-prod-appgw",
+  "type": "Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies",
+  "location": "eastus2",
+  "tags": {
+    "environment": "production",
+    "team": "appsec"
+  },
+  "properties": {
+    "provisioningState": "Succeeded",
+    "policySettings": {
+      "state": "Enabled",
+      "mode": "Prevention",
+      "requestBodyCheck": true,
+      "maxRequestBodySizeInKb": 128,
+      "fileUploadLimitInMb": 100,
+      "requestBodyInspectLimitInKB": 128
+    },
+    "customRules": [
+      {
+        "name": "BlockKnownBadIPs",
+        "priority": 5,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Block",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RemoteAddr",
+                "selector": null
+              }
+            ],
+            "operator": "IPMatch",
+            "negationConditon": false,
+            "matchValues": [
+              "198.51.100.0/24",
+              "203.0.113.0/24",
+              "192.0.2.100",
+              "45.33.32.156"
+            ],
+            "transforms": []
+          }
+        ]
+      },
+      {
+        "name": "RateLimitByIP",
+        "priority": 10,
+        "ruleType": "RateLimitRule",
+        "state": "Enabled",
+        "action": "Block",
+        "rateLimitDuration": "OneMin",
+        "rateLimitThreshold": 100,
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RequestUri",
+                "selector": null
+              }
+            ],
+            "operator": "Contains",
+            "negationConditon": false,
+            "matchValues": [
+              "/api/"
+            ],
+            "transforms": [
+              "Lowercase"
+            ]
+          }
+        ],
+        "groupByUserSession": [
+          {
+            "groupByVariables": [
+              {
+                "variableName": "ClientAddr"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "BlockSQLInjectionInHeaders",
+        "priority": 20,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Block",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RequestHeaders",
+                "selector": "User-Agent"
+              },
+              {
+                "variableName": "RequestHeaders",
+                "selector": "Referer"
+              }
+            ],
+            "operator": "Contains",
+            "negationConditon": false,
+            "matchValues": [
+              "select",
+              "union",
+              "drop",
+              "insert",
+              "exec(",
+              "1=1",
+              "OR 1"
+            ],
+            "transforms": [
+              "Lowercase",
+              "UrlDecode"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "AllowTrustedCrawlers",
+        "priority": 30,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Allow",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RequestHeaders",
+                "selector": "User-Agent"
+              }
+            ],
+            "operator": "Contains",
+            "negationConditon": false,
+            "matchValues": [
+              "Googlebot",
+              "bingbot",
+              "Slurp"
+            ],
+            "transforms": []
+          }
+        ]
+      },
+      {
+        "name": "GeoBlockHighRisk",
+        "priority": 40,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Block",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RemoteAddr",
+                "selector": null
+              }
+            ],
+            "operator": "GeoMatch",
+            "negationConditon": false,
+            "matchValues": [
+              "KP",
+              "IR",
+              "SY",
+              "CU"
+            ],
+            "transforms": []
+          }
+        ]
+      },
+      {
+        "name": "MISCONFIGURED-AllowAllBypass",
+        "priority": 1,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Allow",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RequestHeaders",
+                "selector": "X-Bypass-WAF"
+              }
+            ],
+            "operator": "Equal",
+            "negationConditon": false,
+            "matchValues": [
+              "true"
+            ],
+            "transforms": []
+          }
+        ]
+      },
+      {
+        "name": "BlockPathTraversal",
+        "priority": 50,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Block",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "RequestUri",
+                "selector": null
+              }
+            ],
+            "operator": "Contains",
+            "negationConditon": false,
+            "matchValues": [
+              "../",
+              "..\\",
+              "/etc/passwd",
+              "/proc/self"
+            ],
+            "transforms": [
+              "UrlDecode"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "MISCONFIGURED-LogOnlySQLi",
+        "priority": 60,
+        "ruleType": "MatchRule",
+        "state": "Enabled",
+        "action": "Log",
+        "matchConditions": [
+          {
+            "matchVariables": [
+              {
+                "variableName": "QueryString",
+                "selector": null
+              }
+            ],
+            "operator": "Regex",
+            "negationConditon": false,
+            "matchValues": [
+              "(?i)(union\\s+select|drop\\s+table|insert\\s+into|delete\\s+from)"
+            ],
+            "transforms": [
+              "UrlDecode"
+            ]
+          }
+        ]
+      }
+    ],
+    "managedRules": {
+      "managedRuleSets": [
+        {
+          "ruleSetType": "OWASP",
+          "ruleSetVersion": "3.2",
+          "ruleGroupOverrides": [
+            {
+              "ruleGroupName": "REQUEST-920-PROTOCOL-ENFORCEMENT",
+              "rules": [
+                {
+                  "ruleId": "920300",
+                  "state": "Disabled",
+                  "action": "Log"
+                },
+                {
+                  "ruleId": "920320",
+                  "state": "Disabled",
+                  "action": "Log"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleSetType": "Microsoft_BotManagerRuleSet",
+          "ruleSetVersion": "1.0",
+          "ruleGroupOverrides": []
+        }
+      ],
+      "exclusions": [
+        {
+          "matchVariable": "RequestHeaderNames",
+          "selectorMatchOperator": "Equals",
+          "selector": "Authorization"
+        },
+        {
+          "matchVariable": "RequestCookieNames",
+          "selectorMatchOperator": "StartsWith",
+          "selector": "__Host-"
+        }
+      ]
+    }
+  }
+}

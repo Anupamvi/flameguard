@@ -1,0 +1,324 @@
+{
+  "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultNetworkRuleCollectionGroup",
+  "name": "DefaultNetworkRuleCollectionGroup",
+  "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
+  "properties": {
+    "provisioningState": "Succeeded",
+    "priority": 200,
+    "ruleCollections": [
+      {
+        "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+        "name": "rc-network-allow-infra",
+        "priority": 1000,
+        "action": {
+          "type": "Allow"
+        },
+        "rules": [
+          {
+            "ruleType": "NetworkRule",
+            "name": "Allow-DNS",
+            "description": "Allow DNS resolution to Azure DNS and custom DNS servers",
+            "ipProtocols": [
+              "UDP",
+              "TCP"
+            ],
+            "sourceAddresses": [
+              "10.1.0.0/16"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "168.63.129.16",
+              "10.1.0.4",
+              "10.1.0.5"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "53"
+            ]
+          },
+          {
+            "ruleType": "NetworkRule",
+            "name": "Allow-NTP",
+            "description": "Allow NTP to time servers",
+            "ipProtocols": [
+              "UDP"
+            ],
+            "sourceAddresses": [
+              "10.1.0.0/16"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "168.63.129.16"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "123"
+            ]
+          },
+          {
+            "ruleType": "NetworkRule",
+            "name": "Allow-KMS-Activation",
+            "description": "Windows KMS activation",
+            "ipProtocols": [
+              "TCP"
+            ],
+            "sourceAddresses": [
+              "10.1.0.0/16"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "23.102.135.246",
+              "20.118.99.224"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "1688"
+            ]
+          }
+        ]
+      },
+      {
+        "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+        "name": "MISCONFIGURED-rc-network-allow-all",
+        "priority": 2000,
+        "action": {
+          "type": "Allow"
+        },
+        "rules": [
+          {
+            "ruleType": "NetworkRule",
+            "name": "MISCONFIGURED-Allow-All-Traffic",
+            "description": "TEMP: Allow all for migration - REMOVE AFTER CUTOVER",
+            "ipProtocols": [
+              "Any"
+            ],
+            "sourceAddresses": [
+              "*"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "*"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "*"
+            ]
+          }
+        ]
+      },
+      {
+        "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+        "name": "rc-network-deny-highrisk",
+        "priority": 500,
+        "action": {
+          "type": "Deny"
+        },
+        "rules": [
+          {
+            "ruleType": "NetworkRule",
+            "name": "Deny-Telnet",
+            "description": "Block Telnet from anywhere",
+            "ipProtocols": [
+              "TCP"
+            ],
+            "sourceAddresses": [
+              "*"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "*"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "23"
+            ]
+          },
+          {
+            "ruleType": "NetworkRule",
+            "name": "Deny-SMB-External",
+            "description": "Block SMB to external addresses",
+            "ipProtocols": [
+              "TCP"
+            ],
+            "sourceAddresses": [
+              "10.1.0.0/16"
+            ],
+            "sourceIpGroups": [],
+            "destinationAddresses": [
+              "*"
+            ],
+            "destinationIpGroups": [],
+            "destinationFqdns": [],
+            "destinationPorts": [
+              "445",
+              "139"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_siblings": {
+    "ApplicationRuleCollectionGroup": {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultApplicationRuleCollectionGroup",
+      "name": "DefaultApplicationRuleCollectionGroup",
+      "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
+      "properties": {
+        "provisioningState": "Succeeded",
+        "priority": 300,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "name": "rc-app-allow-web",
+            "priority": 1000,
+            "action": {
+              "type": "Allow"
+            },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Allow-Windows-Update",
+                "description": "Allow Windows Update FQDNs",
+                "sourceAddresses": [
+                  "10.1.0.0/16"
+                ],
+                "sourceIpGroups": [],
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "targetFqdns": [
+                  "*.windowsupdate.com",
+                  "*.update.microsoft.com",
+                  "*.download.windowsupdate.com"
+                ],
+                "fqdnTags": [],
+                "targetUrls": [],
+                "webCategories": [],
+                "terminateTLS": false
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "Allow-Azure-Monitor",
+                "description": "Allow Azure Monitor and Log Analytics",
+                "sourceAddresses": [
+                  "10.1.0.0/16"
+                ],
+                "sourceIpGroups": [],
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "targetFqdns": [
+                  "*.ods.opinsights.azure.com",
+                  "*.oms.opinsights.azure.com",
+                  "*.monitoring.azure.com"
+                ],
+                "fqdnTags": [],
+                "targetUrls": [],
+                "webCategories": [],
+                "terminateTLS": false
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "MISCONFIGURED-Allow-All-HTTPS",
+                "description": "Overly permissive - allows all HTTPS outbound",
+                "sourceAddresses": [
+                  "*"
+                ],
+                "sourceIpGroups": [],
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  },
+                  {
+                    "protocolType": "Http",
+                    "port": 80
+                  }
+                ],
+                "targetFqdns": [
+                  "*"
+                ],
+                "fqdnTags": [],
+                "targetUrls": [],
+                "webCategories": [],
+                "terminateTLS": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "NatRuleCollectionGroup": {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultDnatRuleCollectionGroup",
+      "name": "DefaultDnatRuleCollectionGroup",
+      "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
+      "properties": {
+        "provisioningState": "Succeeded",
+        "priority": 100,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyNatRuleCollection",
+            "name": "rc-dnat-inbound",
+            "priority": 1000,
+            "action": {
+              "type": "DNAT"
+            },
+            "rules": [
+              {
+                "ruleType": "NatRule",
+                "name": "DNAT-HTTPS-to-WebServer",
+                "description": "Inbound HTTPS to web server",
+                "ipProtocols": [
+                  "TCP"
+                ],
+                "sourceAddresses": [
+                  "*"
+                ],
+                "sourceIpGroups": [],
+                "destinationAddresses": [
+                  "20.85.100.50"
+                ],
+                "destinationPorts": [
+                  "443"
+                ],
+                "translatedAddress": "10.1.2.10",
+                "translatedPort": "8443"
+              },
+              {
+                "ruleType": "NatRule",
+                "name": "MISCONFIGURED-DNAT-SSH-to-JumpBox",
+                "description": "DNAT SSH from any source to internal jump box",
+                "ipProtocols": [
+                  "TCP"
+                ],
+                "sourceAddresses": [
+                  "*"
+                ],
+                "sourceIpGroups": [],
+                "destinationAddresses": [
+                  "20.85.100.50"
+                ],
+                "destinationPorts": [
+                  "2222"
+                ],
+                "translatedAddress": "10.1.5.4",
+                "translatedPort": "22"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

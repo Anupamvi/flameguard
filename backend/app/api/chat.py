@@ -1,0 +1,148 @@
+"""POST /audit/{audit_id}/chat -- SSE streaming chat about audit findings."""
+
+from __future__ import annotations
+
+import json
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
+
+from app.api.deps import get_db
+from app.config import settings
+from app.llm.client import ClaudeClient
+from app.llm.prompts.chat import SYSTEM_CHAT
+from app.models.audit import AuditFinding, AuditReport
+from app.models.chat import ChatMessage
+from app.models.rule import Rule
+from app.schemas.chat import ChatRequest
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def _build_rules_summary(rules: list[Rule], limit: int = 20) -> str:
+    """Build a compact text summary of rules for the system prompt."""
+    if not rules:
+        return "No rules loaded."
+
+    lines = []
+    for r in rules[:limit]:
+        src = r.source_addresses or '["*"]'
+        dst = r.dest_addresses or '["*"]'
+        ports = r.dest_ports or '["*"]'
+        lines.append(
+            f"- {r.name}: {r.action} {r.direction} {r.protocol or 'Any'} "
+            f"src={src} dst={dst} ports={ports} pri={r.priority}"
+        )
+    suffix = f"\n... and {len(rules) - limit} more rules" if len(rules) > limit else ""
+    return "\n".join(lines) + suffix
+
+
+def _build_findings_summary(findings: list[AuditFinding]) -> str:
+    """Build a compact text summary of audit findings for the system prompt."""
+    if not findings:
+        return "No findings."
+
+    lines = []
+    for f in findings:
+        lines.append(f"- [{f.severity.upper()}] {f.title}: {f.description[:120]}")
+    return "\n".join(lines)
+
+
+@router.post("/audit/{audit_id}/chat")
+async def chat_about_audit(
+    audit_id: str,
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Chat with the AI about audit findings. Returns an SSE stream."""
+
+    # --- Validate API key ---
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
+
+    # --- Load audit report ---
+    result = await db.execute(
+        select(AuditReport).where(AuditReport.id == audit_id)
+    )
+    audit = result.scalar_one_or_none()
+    if not audit:
+        raise HTTPException(status_code=404, detail=f"Audit report '{audit_id}' not found")
+
+    # --- Load rules for this audit's ruleset ---
+    rules_result = await db.execute(
+        select(Rule).where(Rule.ruleset_id == audit.ruleset_id)
+    )
+    rules = list(rules_result.scalars().all())
+
+    # --- Load findings ---
+    findings_result = await db.execute(
+        select(AuditFinding).where(AuditFinding.audit_id == audit_id)
+    )
+    findings = list(findings_result.scalars().all())
+
+    # --- Build system prompt ---
+    rules_summary = _build_rules_summary(rules)
+    findings_summary = _build_findings_summary(findings)
+    system_prompt = SYSTEM_CHAT.format(
+        rules_summary=rules_summary,
+        findings_summary=findings_summary,
+    )
+
+    # --- Load chat history ---
+    history_result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.audit_id == audit_id)
+        .order_by(ChatMessage.created_at)
+    )
+    history = list(history_result.scalars().all())
+
+    # --- Save user message ---
+    user_msg = ChatMessage(
+        audit_id=audit_id,
+        role="user",
+        content=request.message,
+    )
+    db.add(user_msg)
+    await db.commit()
+
+    # --- Build conversation for LLM ---
+    conversation: list[dict[str, str]] = []
+    for msg in history:
+        conversation.append({"role": msg.role, "content": msg.content})
+    conversation.append({"role": "user", "content": request.message})
+
+    # --- Stream response ---
+    llm = ClaudeClient()
+
+    async def event_generator():
+        full_response = ""
+        try:
+            with llm.stream(system=system_prompt, messages=conversation) as stream:
+                for text in stream.text_stream:
+                    full_response += text
+                    yield {"data": json.dumps({"content": text})}
+        except Exception as exc:
+            logger.error("LLM streaming error: %s", exc)
+            yield {"data": json.dumps({"error": str(exc)})}
+            return
+
+        # Save assistant message to DB after stream completes
+        try:
+            async with db.begin():
+                assistant_msg = ChatMessage(
+                    audit_id=audit_id,
+                    role="assistant",
+                    content=full_response,
+                )
+                db.add(assistant_msg)
+        except Exception as exc:
+            logger.error("Failed to save assistant message: %s", exc)
+
+        yield {"data": json.dumps({"done": True, "full_content": full_response})}
+
+    return EventSourceResponse(event_generator())
