@@ -1,5 +1,7 @@
 import asyncio
+import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
@@ -8,6 +10,12 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.models import Base
 
 config = context.config
+
+# Override alembic.ini URL with env var if set
+db_path = os.environ.get("FLAMEGUARD_DB_PATH", "./data/flameguard.db")
+Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

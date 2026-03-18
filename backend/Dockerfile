@@ -2,16 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Copy all source first so pip install can find the app package
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
 COPY app/ app/
 COPY alembic/ alembic/
 COPY alembic.ini .
 
+RUN pip install --no-cache-dir .
+
 RUN mkdir -p /data
 
-ENV FLAMEGUARD_DB_PATH=/data/flameguard.db
+ENV FLAMEGUARD_DB_PATH=/tmp/flameguard.db
 
 EXPOSE 8000
 

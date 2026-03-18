@@ -19,6 +19,7 @@ def create_app() -> FastAPI:
         description="LLM-powered firewall rule auditor and policy generator",
         version="0.1.0",
         lifespan=lifespan,
+        debug=False,
     )
 
     app.add_middleware(
