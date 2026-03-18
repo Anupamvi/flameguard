@@ -477,7 +477,85 @@ CLAUDE_MODEL=claude-haiku-4-5-20251001
 
 ---
 
-### Option B: Claude Code in VSCode — Will It Work?
+### Option B: Azure AI Foundry (Enterprise / No Direct API Key)
+
+If your organization can't use direct Anthropic API keys (policy, data residency, billing), you can run Claude through **Azure AI Foundry** (formerly Azure AI Studio). Claude models are available in the Azure AI Model Catalog.
+
+**FlameGuard natively supports this** — just change 2 environment variables.
+
+#### Step 1: Deploy Claude Model in Azure AI Foundry
+
+1. Go to https://ai.azure.com/
+2. Create or select an **AI Hub** resource
+3. Navigate to **Model catalog** → search for **Claude**
+4. Select your model (e.g., `claude-sonnet-4-20250514`)
+5. Click **Deploy** → Serverless API deployment
+6. Note your:
+   - **Endpoint URL**: `https://<resource>.services.ai.azure.com`
+   - **API Key**: from the deployment's Keys section
+
+#### Step 2: Configure FlameGuard
+
+In your `.env` file:
+```env
+# Switch to Azure provider
+LLM_PROVIDER=azure
+
+# Your Azure AI Foundry endpoint
+AZURE_ENDPOINT=https://<your-resource>.services.ai.azure.com
+
+# Azure API key from the deployment
+AZURE_API_KEY=your-azure-api-key
+
+# Model name (same as the Anthropic model name)
+CLAUDE_MODEL=claude-sonnet-4-20250514
+```
+
+Or on Azure Container Apps:
+```bash
+az containerapp update --name flameguard-backend --resource-group flameguard-rg \
+  --set-env-vars \
+    "LLM_PROVIDER=azure" \
+    "AZURE_ENDPOINT=https://<your-resource>.services.ai.azure.com" \
+    "AZURE_API_KEY=your-azure-api-key" \
+    "CLAUDE_MODEL=claude-sonnet-4-20250514"
+```
+
+#### Step 3 (Optional): Keyless Auth with Managed Identity
+
+For production, avoid API keys entirely. Use Azure Managed Identity / Entra ID:
+
+1. Assign the **Cognitive Services User** role to your VM/Container App's managed identity
+2. Install the Azure identity library:
+   ```bash
+   pip install azure-identity
+   ```
+3. Set env vars (no AZURE_API_KEY needed):
+   ```env
+   LLM_PROVIDER=azure
+   AZURE_ENDPOINT=https://<your-resource>.services.ai.azure.com
+   # Leave AZURE_API_KEY empty — will use DefaultAzureCredential
+   ```
+
+FlameGuard auto-detects: if `AZURE_API_KEY` is empty, it uses `DefaultAzureCredential` (Managed Identity → Azure CLI → environment variables fallback chain).
+
+#### Azure AI Foundry vs Direct API — Comparison
+
+| Aspect | Direct Anthropic API | Azure AI Foundry |
+|--------|---------------------|-----------------|
+| Authentication | Anthropic API key | Azure API key or Entra ID |
+| Billing | Anthropic account (pay-per-token) | Azure subscription (consolidated billing) |
+| Data residency | Anthropic US servers | Azure region of your choice |
+| Network | Public internet | Can use private endpoints / VNet |
+| Compliance | Anthropic's terms | Azure compliance certifications |
+| Setup complexity | Simple (1 API key) | Moderate (AI Hub + model deployment) |
+| Model availability | All Claude models | Subset in Azure catalog |
+
+**Recommendation:** Use Azure AI Foundry if you need data residency, private networking, consolidated Azure billing, or your org policy blocks external API keys.
+
+---
+
+### Option C: Claude Code in VSCode — Will It Work?
 
 **Short answer: No, not directly.**
 
@@ -531,4 +609,4 @@ Anthropic offers a **free tier** for new API accounts with limited usage. Check 
     --secrets "anthropic-key=sk-ant-api03-your-key"
   ```
 - **Anthropic's API does not train on customer data** (per their API terms). Normalized rule data (not raw JSON) is sent to the API. Document this for your users.
-- **For data-residency-sensitive deployments**, consider Azure OpenAI as an alternative backend (Phase 2 planned).
+- **For data-residency-sensitive deployments**, set `LLM_PROVIDER=azure` and use Azure AI Foundry with private endpoints (see Option B above).
