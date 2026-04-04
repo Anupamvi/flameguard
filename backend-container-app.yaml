@@ -1,0 +1,26 @@
+properties:
+  template:
+    containers:
+      - name: flameguard-backend
+        image: flameguardacr.azurecr.io/flameguard-backend:v1
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: LLM_PROVIDER
+            value: azure
+          - name: AZURE_ENDPOINT
+            value: "https://eastus.api.cognitive.microsoft.com/"
+          - name: AZURE_API_KEY
+            value: placeholder
+          - name: CLAUDE_MODEL
+            value: claude-sonnet-4-20250514
+          - name: DB_PATH
+            value: /tmp/flameguard.db
+          - name: FLAMEGUARD_DB_PATH
+            value: /tmp/flameguard.db
+          - name: CORS_ORIGINS
+            value: '["https://flameguard-frontend.victoriousbush-302f74f1.eastus.azurecontainerapps.io"]'
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
