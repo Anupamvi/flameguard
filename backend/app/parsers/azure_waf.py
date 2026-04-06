@@ -28,6 +28,19 @@ class AzureWAFParser(BaseParser):
 
     _APPGW_TYPE = "Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies"
     _FD_TYPE = "Microsoft.Network/FrontDoorWebApplicationFirewallPolicies"
+    _LOG_EXPORT_KEYS = ("sampleLogs",)
+    _WAF_LOG_CATEGORIES = {
+        "ApplicationGatewayFirewallLog",
+        "FrontDoorWebApplicationFirewallLog",
+        "FrontdoorWebApplicationFirewallLog",
+    }
+    _AMBIGUOUS_SCHEMA_HINTS = {
+        "clientIP_s",
+        "HostName_s",
+        "listenerName_s",
+        "originalRequestUriWithArgs_s",
+        "transactionId_g",
+    }
 
     def can_parse(self, data: dict[str, Any]) -> bool:
         rtype = data.get("type", "")
@@ -36,9 +49,18 @@ class AzureWAFParser(BaseParser):
         for r in data.get("resources", []):
             if r.get("type") in (self._APPGW_TYPE, self._FD_TYPE):
                 return True
+        if self._looks_like_waf_bundle(data):
+            return True
+        if self._contains_waf_log_rows(self._extract_log_rows(data)):
+            return True
+        if any(self._contains_waf_log_rows(self._extract_log_rows(data.get(key))) for key in self._LOG_EXPORT_KEYS):
+            return True
         return False
 
     def parse(self, data: dict[str, Any]) -> list[NormalizedRule]:
+        if self._contains_waf_log_rows(self._extract_log_rows(data)) or self._looks_like_waf_bundle(data):
+            return self._parse_log_export(data)
+
         rules: list[NormalizedRule] = []
         for waf_resource in self._extract_waf_resources(data):
             props = waf_resource.get("properties", {})
@@ -93,13 +115,222 @@ class AzureWAFParser(BaseParser):
             "matchConditions": match_conditions,
         }
 
+    def looks_like_ambiguous_log_export(self, data: dict[str, Any]) -> bool:
+        if self._looks_like_waf_bundle(data):
+            return True
+        if self._looks_like_waf_log_schema(data):
+            return True
+        return any(self._looks_like_waf_log_schema(data.get(key)) for key in self._LOG_EXPORT_KEYS)
+
     # ── Internals ──
+
+    def _parse_log_export(self, data: dict[str, Any]) -> list[NormalizedRule]:
+        direct_rows = self._extract_log_rows(data)
+        if direct_rows:
+            return self._parse_log_rows(direct_rows)
+
+        rules: list[NormalizedRule] = []
+        for key in self._LOG_EXPORT_KEYS:
+            rows = self._extract_log_rows(data.get(key))
+            rules.extend(self._parse_log_rows(rows))
+        return rules
 
     def _extract_waf_resources(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         rtype = data.get("type", "")
         if rtype in (self._APPGW_TYPE, self._FD_TYPE):
             return [data]
         return [r for r in data.get("resources", []) if r.get("type") in (self._APPGW_TYPE, self._FD_TYPE)]
+
+    def _parse_log_rows(self, rows: list[dict[str, Any]]) -> list[NormalizedRule]:
+        return [self._parse_log_row(row) for row in rows if self._looks_like_waf_log_row(row)]
+
+    def _parse_log_row(self, row: dict[str, Any]) -> NormalizedRule:
+        category = self._first_non_empty(row, "Category", "category") or "ApplicationGatewayFirewallLog"
+        request_uri = self._first_non_empty(row, "requestUri_s", "originalRequestUriWithArgs_s")
+        hostname = self._first_non_empty(row, "HostName_s", "host_s", "host", "originalHost_s")
+        listener_name = self._first_non_empty(row, "listenerName_s")
+        client_ip = self._first_non_empty(row, "clientIP_s", "clientIp_s", "CallerIPAddress") or "*"
+        transaction_id = self._first_non_empty(row, "transactionId_g", "CorrelationId")
+        rule_name = self._first_non_empty(row, "ruleName_s", "ruleId_s")
+        time_generated = str(row.get("TimeGenerated") or "")
+        action = self._coerce_log_action(
+            self._first_non_empty(row, "action_s", "Action_s", "Action", "ResultType", "RecommendedAction_s")
+        )
+        destination_ports = self._coerce_destination_ports(row, request_uri)
+        message = self._first_non_empty(row, "Message", "details_message_s", "ResultDescription")
+
+        description_parts = [f"Observed {category}"]
+        if request_uri:
+            description_parts.append(f"uri={request_uri}")
+        if message:
+            description_parts.append(message)
+        if time_generated:
+            description_parts.append(f"time={time_generated}")
+
+        rule_label = rule_name or request_uri or hostname or "Observed WAF event"
+        target = hostname or listener_name or "*"
+
+        tags = {
+            "rule_type": "ObservedWAFLog",
+            "log_category": category,
+            "listener_name": listener_name or "",
+            "transaction_id": transaction_id or "",
+            "hostname": hostname or "",
+        }
+
+        for source_key, tag_key in (
+            ("ruleId_s", "rule_id"),
+            ("ruleSetType_s", "rule_set_type"),
+            ("ruleSetVersion_s", "rule_set_version"),
+            ("site_s", "site"),
+        ):
+            value = self._first_non_empty(row, source_key)
+            if value:
+                tags[tag_key] = value
+
+        return NormalizedRule(
+            original_id=self._build_log_id("waf", rule_name or transaction_id, time_generated),
+            name=self._trim(rule_label),
+            vendor=VendorType.AZURE_WAF,
+            action=action,
+            direction=RuleDirection.INBOUND,
+            protocol="HTTPS" if destination_ports == ["443"] else "HTTP/HTTPS",
+            source_addresses=[client_ip],
+            source_ports=self._list_value(row.get("clientPort_d"), default="*"),
+            destination_addresses=[self._trim(target)],
+            destination_ports=destination_ports,
+            priority=self._coerce_priority(row.get("priority_d")),
+            description="; ".join(description_parts),
+            enabled=True,
+            raw_json=row,
+            tags=tags,
+        )
+
+    def _looks_like_waf_bundle(self, data: dict[str, Any]) -> bool:
+        if not isinstance(data, dict):
+            return False
+        if isinstance(data.get("wafResources"), list):
+            return True
+        if isinstance(data.get("diagnosticSettings"), list):
+            return any(
+                any(category in self._WAF_LOG_CATEGORIES for category in setting.get("categories", []))
+                for setting in data["diagnosticSettings"]
+                if isinstance(setting, dict)
+            )
+        return False
+
+    def _contains_waf_log_rows(self, rows: list[dict[str, Any]]) -> bool:
+        return any(self._looks_like_waf_log_row(row) for row in rows)
+
+    def _looks_like_waf_log_row(self, row: dict[str, Any]) -> bool:
+        category = str(row.get("Category") or row.get("category") or "")
+        if category in self._WAF_LOG_CATEGORIES:
+            return True
+        client_ip = self._first_non_empty(row, "clientIP_s", "clientIp_s", "CallerIPAddress")
+        request_uri = self._first_non_empty(row, "requestUri_s", "originalRequestUriWithArgs_s")
+        destination = self._first_non_empty(row, "HostName_s", "host_s", "listenerName_s")
+        return bool(client_ip and request_uri and destination)
+
+    def _looks_like_waf_log_schema(self, section: Any) -> bool:
+        column_names = self._extract_column_names(section)
+        if not column_names or "Category" not in column_names:
+            return False
+        return len(self._AMBIGUOUS_SCHEMA_HINTS & column_names) >= 3
+
+    def _extract_column_names(self, section: Any) -> set[str]:
+        if not isinstance(section, dict):
+            return set()
+        if isinstance(section.get("tables"), list):
+            column_names: set[str] = set()
+            for table in section["tables"]:
+                column_names.update(self._extract_column_names(table))
+            return column_names
+        if isinstance(section.get("columns"), list):
+            return {str(column.get("name") or "") for column in section["columns"] if isinstance(column, dict)}
+        return set()
+
+    def _extract_log_rows(self, section: Any) -> list[dict[str, Any]]:
+        if isinstance(section, list):
+            return [item for item in section if isinstance(item, dict)]
+        if not isinstance(section, dict):
+            return []
+        if isinstance(section.get("tables"), list):
+            rows: list[dict[str, Any]] = []
+            for table in section["tables"]:
+                rows.extend(self._table_to_rows(table))
+            return rows
+        if isinstance(section.get("rows"), list) and isinstance(section.get("columns"), list):
+            return self._table_to_rows(section)
+        return []
+
+    def _table_to_rows(self, table: dict[str, Any]) -> list[dict[str, Any]]:
+        columns = [str(column.get("name") or f"col_{idx}") for idx, column in enumerate(table.get("columns", []))]
+        rows: list[dict[str, Any]] = []
+        for raw_row in table.get("rows", []):
+            if isinstance(raw_row, dict):
+                rows.append(raw_row)
+                continue
+            if not isinstance(raw_row, list):
+                continue
+            rows.append({
+                columns[idx]: raw_row[idx] if idx < len(raw_row) else None
+                for idx in range(len(columns))
+            })
+        return rows
+
+    @staticmethod
+    def _coerce_log_action(value: Any) -> RuleAction:
+        normalized = str(value or "").strip().lower()
+        if any(token in normalized for token in ("block", "deny", "prevent")):
+            return RuleAction.DENY
+        if any(token in normalized for token in ("allow", "permit")):
+            return RuleAction.ALLOW
+        return RuleAction.LOG
+
+    def _coerce_destination_ports(self, row: dict[str, Any], request_uri: str | None) -> list[str]:
+        ssl_enabled = str(row.get("sslEnabled_s") or "").strip().lower()
+        uri = str(request_uri or "").strip().lower()
+        if ssl_enabled in {"true", "1", "yes", "enabled"} or uri.startswith("https://"):
+            return ["443"]
+        if ssl_enabled in {"false", "0", "no", "disabled"} or uri.startswith("http://"):
+            return ["80"]
+        return ["80", "443"]
+
+    @staticmethod
+    def _coerce_priority(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _first_non_empty(row: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    def _list_value(self, value: Any, default: str = "*") -> list[str]:
+        if value in (None, ""):
+            return [default]
+        if isinstance(value, list):
+            items = [str(item) for item in value if item not in (None, "")]
+            return items or [default]
+        return [str(value)]
+
+    def _build_log_id(self, prefix: str, primary: Any, fallback: Any) -> str:
+        if primary not in (None, ""):
+            return self._trim(f"{prefix}:{primary}")
+        if fallback not in (None, ""):
+            return self._trim(f"{prefix}:{fallback}")
+        return prefix
+
+    @staticmethod
+    def _trim(value: str, max_length: int = 255) -> str:
+        return value[:max_length]
 
     def _parse_custom_rule(self, rule: dict[str, Any], waf_type: str) -> NormalizedRule | None:
         name = rule.get("name", "")

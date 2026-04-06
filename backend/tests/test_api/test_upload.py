@@ -66,6 +66,31 @@ class TestUploadEndpoint:
         assert resp.json()["vendor"] == "azure_waf"
 
     @pytest.mark.asyncio
+    async def test_upload_waf_log_export(self, client, waf_log_export_raw):
+        payload = json.dumps(waf_log_export_raw).encode("utf-8")
+        resp = await client.post(
+            "/api/v1/upload",
+            files={"file": ("application-gateway-logs.json", payload, "application/json")},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["vendor"] == "azure_waf"
+        assert data["rule_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_upload_empty_waf_log_export_uses_filename_fallback(self, client, waf_log_export_empty_raw):
+        payload = json.dumps(waf_log_export_empty_raw).encode("utf-8")
+        resp = await client.post(
+            "/api/v1/upload",
+            files={"file": ("contoso-waf-samples-2026-04-06.json", payload, "application/json")},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["vendor"] == "azure_waf"
+        assert data["rule_count"] == 0
+        assert data["parse_warnings"] == ["No rules found in the uploaded configuration"]
+
+    @pytest.mark.asyncio
     async def test_upload_invalid_json(self, client):
         resp = await client.post("/api/v1/upload", files={"file": ("bad.json", b"not json", "application/json")})
         assert resp.status_code == 400

@@ -12,10 +12,40 @@ class TestAzureWAFParser:
     def test_cannot_parse_unrelated(self):
         assert self.parser.can_parse({"type": "Microsoft.Network/azureFirewalls"}) is False
 
+    def test_can_parse_raw_waf_log_export(self, waf_log_export_raw):
+        assert self.parser.can_parse(waf_log_export_raw) is True
+
+    def test_can_parse_waf_log_bundle(self, waf_log_export_bundle):
+        assert self.parser.can_parse(waf_log_export_bundle) is True
+
+    def test_does_not_parse_firewall_log_export(self, firewall_log_export_raw):
+        assert self.parser.can_parse(firewall_log_export_raw) is False
+
+    def test_flags_ambiguous_waf_log_export_schema_without_auto_detecting(self, waf_log_export_empty_raw):
+        assert self.parser.looks_like_ambiguous_log_export(waf_log_export_empty_raw) is True
+        assert self.parser.can_parse(waf_log_export_empty_raw) is False
+
     def test_parse_returns_rules(self, waf_data):
         rules = self.parser.parse(waf_data)
         assert len(rules) > 0
         assert all(r.vendor == VendorType.AZURE_WAF for r in rules)
+
+    def test_parse_raw_waf_log_export(self, waf_log_export_raw):
+        rules = self.parser.parse(waf_log_export_raw)
+        assert len(rules) == 1
+        rule = rules[0]
+        assert rule.vendor == VendorType.AZURE_WAF
+        assert rule.direction == RuleDirection.INBOUND
+        assert rule.action == RuleAction.DENY
+        assert rule.source_addresses == ["198.51.100.24"]
+        assert rule.destination_addresses == ["shop.contoso.com"]
+        assert rule.destination_ports == ["443"]
+        assert rule.tags.get("rule_type") == "ObservedWAFLog"
+
+    def test_parse_waf_log_bundle(self, waf_log_export_bundle):
+        rules = self.parser.parse(waf_log_export_bundle)
+        assert len(rules) == 1
+        assert rules[0].name == "SQLiBlock"
 
     def test_all_rules_are_inbound(self, waf_data):
         rules = self.parser.parse(waf_data)

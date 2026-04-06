@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React from "react";
+import { useSearchParams } from "next/navigation";
 import { useAudit, useAuditRules, useAuditCompliance } from "@/hooks/use-audit";
 import type { AuditResponse, ComplianceSummary, FindingOut, RuleOut } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,10 @@ import {
 } from "lucide-react";
 
 type AuditTab = "overview" | "rules" | "findings" | "compliance" | "riskmap";
+
+function isAuditTab(value: string | null): value is AuditTab {
+  return value === "overview" || value === "rules" || value === "findings" || value === "compliance" || value === "riskmap";
+}
 
 const INTERNET_SOURCES = new Set(["*", "0.0.0.0/0", "0.0.0.0", "internet", "any"]);
 const FRAMEWORK_LABELS: Record<string, string> = {
@@ -446,7 +451,9 @@ export default function AuditDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const [activeTab, setActiveTab] = React.useState<AuditTab>("overview");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = React.useState<AuditTab>(isAuditTab(requestedTab) ? requestedTab : "overview");
   const { id } = React.use(params);
   const { data: audit, isLoading: auditLoading } = useAudit(id);
   const {
@@ -460,48 +467,34 @@ export default function AuditDetailPage({
     error: complianceError,
   } = useAuditCompliance(id);
 
-  if (auditLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
-      </div>
-    );
-  }
+  React.useEffect(() => {
+    if (isAuditTab(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
-  if (!audit) {
-    return (
-      <div className="flex h-64 items-center justify-center text-sm text-gray-500">
-        Audit not found.
-      </div>
-    );
-  }
-
-  const postureScore = calculatePostureScore(audit);
+  const auditFindings = audit?.findings ?? [];
+  const ruleList = rules ?? [];
+  const postureScore = audit ? calculatePostureScore(audit) : 100;
   const priorityFindings = React.useMemo(
-    () => sortPriorityFindings(audit.findings).slice(0, 3),
-    [audit.findings],
+    () => sortPriorityFindings(auditFindings).slice(0, 3),
+    [auditFindings],
   );
   const flaggedRuleIds = React.useMemo(
-    () => new Set(audit.findings.flatMap((finding) => finding.affected_rule_ids)),
-    [audit.findings],
+    () => new Set(auditFindings.flatMap((finding) => finding.affected_rule_ids)),
+    [auditFindings],
   );
   const internetExposedRules = React.useMemo(
-    () =>
-      (rules ?? []).filter(
-        (rule) => isInboundAllow(rule) && isInternetSource(rule.source_addresses),
-      ),
-    [rules],
+    () => ruleList.filter((rule) => isInboundAllow(rule) && isInternetSource(rule.source_addresses)),
+    [ruleList],
   );
   const sensitiveExposureRules = React.useMemo(
     () => internetExposedRules.filter((rule) => exposedSensitiveServices(rule).length > 0),
     [internetExposedRules],
   );
   const broadOutboundRules = React.useMemo(
-    () =>
-      (rules ?? []).filter(
-        (rule) => isOutboundAllow(rule) && isInternetSource(rule.destination_addresses),
-      ),
-    [rules],
+    () => ruleList.filter((rule) => isOutboundAllow(rule) && isInternetSource(rule.destination_addresses)),
+    [ruleList],
   );
   const surfaceRules = React.useMemo(
     () => [...internetExposedRules].sort((left, right) => exposurePriority(right) - exposurePriority(left)).slice(0, 4),
@@ -522,6 +515,22 @@ export default function AuditDetailPage({
       passingRate: applicable > 0 ? percent(applicable - failed, applicable) : 100,
     };
   }, [compliance]);
+
+  if (auditLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+      </div>
+    );
+  }
+
+  if (!audit) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-gray-500">
+        Audit not found.
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1280px] space-y-6" style={{ animation: "fadeIn 0.5s ease-out" }}>

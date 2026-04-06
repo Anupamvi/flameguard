@@ -387,7 +387,7 @@ function PriorityFindingCard({ finding, auditId }: { finding: FindingOut; auditI
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Link href={`/audit/${auditId}`} className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100">
+          <Link href={`/audit/${auditId}?tab=findings&finding=${finding.id}`} className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100">
             Investigate
             <ArrowRight className="h-4 w-4" />
           </Link>
@@ -545,9 +545,9 @@ export default function DashboardPage() {
   return (
     <div className="max-w-[1280px] space-y-6" style={{ animation: "fadeIn 0.5s ease-out" }}>
       <div className="relative overflow-hidden rounded-[28px] border border-white/[0.08] px-7 py-7" style={{ background: "linear-gradient(140deg, #151C2F 0%, #0B0F1A 56%, #201321 100%)" }}>
-        <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }} />
-        <div className="absolute -left-16 top-14 h-64 w-64 rounded-full bg-sev-critical/10 blur-[110px]" />
-        <div className="absolute -right-14 top-0 h-72 w-72 rounded-full bg-flame-500/15 blur-[120px]" />
+        <div className="pointer-events-none absolute inset-0 opacity-[0.04]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }} />
+        <div className="pointer-events-none absolute -left-16 top-14 h-64 w-64 rounded-full bg-sev-critical/10 blur-[110px]" />
+        <div className="pointer-events-none absolute -right-14 top-0 h-72 w-72 rounded-full bg-flame-500/15 blur-[120px]" />
 
         <div className="relative grid gap-6 xl:grid-cols-[1.25fr_0.95fr] xl:items-start">
           <div>
@@ -607,7 +607,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-surface-800/80 p-5" style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.16)" }}>
-            <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full blur-[90px]" style={{ background: `${focusUrgentCount > 0 ? SEV.critical.color : PASS_COLOR}22` }} />
+            <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full blur-[90px]" style={{ background: `${focusUrgentCount > 0 ? SEV.critical.color : PASS_COLOR}22` }} />
             <div className="relative">
               <div className="flex items-start justify-between gap-4">
                 <div>

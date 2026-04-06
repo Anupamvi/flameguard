@@ -215,3 +215,101 @@ def firewall_log_export_raw():
             ]
         },
     }
+
+
+
+@pytest.fixture
+def waf_log_export_raw():
+    return {
+        "tables": [
+            {
+                "name": "PrimaryResult",
+                "columns": [
+                    {"name": "TimeGenerated", "type": "datetime"},
+                    {"name": "Category", "type": "string"},
+                    {"name": "clientIP_s", "type": "string"},
+                    {"name": "clientPort_d", "type": "real"},
+                    {"name": "HostName_s", "type": "string"},
+                    {"name": "requestUri_s", "type": "string"},
+                    {"name": "ruleId_s", "type": "string"},
+                    {"name": "ruleName_s", "type": "string"},
+                    {"name": "action_s", "type": "string"},
+                    {"name": "sslEnabled_s", "type": "string"},
+                    {"name": "Message", "type": "string"},
+                    {"name": "transactionId_g", "type": "string"},
+                    {"name": "listenerName_s", "type": "string"},
+                    {"name": "priority_d", "type": "real"},
+                ],
+                "rows": [
+                    [
+                        "2026-04-06T10:14:33.100000Z",
+                        "ApplicationGatewayFirewallLog",
+                        "198.51.100.24",
+                        58231,
+                        "shop.contoso.com",
+                        "https://shop.contoso.com/login?debug=1",
+                        "942100",
+                        "SQLiBlock",
+                        "Blocked",
+                        "true",
+                        "Detected SQL injection pattern",
+                        "11111111-2222-3333-4444-555555555555",
+                        "public-https-listener",
+                        100,
+                    ]
+                ],
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def waf_log_export_bundle(waf_log_export_raw):
+    return {
+        "exportedAt": "2026-04-06T12:34:24.7235460-07:00",
+        "workspace": {
+            "name": "CH1-LA-PRD",
+            "customerId": "822b3148-c451-4ceb-bab4-7b6df7aa3064",
+        },
+        "wafResources": [
+            {
+                "name": "CH1-AppFEAppGate-Pri",
+                "resourceId": "/subscriptions/ebb79bc0-aa86-44a7-8111-cabbe0c43993/resourceGroups/CH1-RetailRG-Pri/providers/Microsoft.Network/applicationGateways/CH1-AppFEAppGate-Pri",
+            }
+        ],
+        "diagnosticSettings": [
+            {
+                "name": "SetByCustomPolicy",
+                "categories": [
+                    "ApplicationGatewayAccessLog",
+                    "ApplicationGatewayPerformanceLog",
+                    "ApplicationGatewayFirewallLog",
+                ],
+            }
+        ],
+        "summary": {"TotalRows": 1},
+        "sampleLogs": waf_log_export_raw,
+    }
+
+
+@pytest.fixture
+def waf_log_export_empty_raw():
+    return {
+        "tables": [
+            {
+                "name": "PrimaryResult",
+                "columns": [
+                    {"name": "TenantId", "type": "string"},
+                    {"name": "TimeGenerated", "type": "datetime"},
+                    {"name": "Category", "type": "string"},
+                    {"name": "Message", "type": "string"},
+                    {"name": "clientIP_s", "type": "string"},
+                    {"name": "HostName_s", "type": "string"},
+                    {"name": "listenerName_s", "type": "string"},
+                    {"name": "originalRequestUriWithArgs_s", "type": "string"},
+                    {"name": "transactionId_g", "type": "string"},
+                ],
+                "rows": [],
+            }
+        ]
+    }

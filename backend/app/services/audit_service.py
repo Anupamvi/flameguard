@@ -8,9 +8,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditReport
 from app.models.rule import Rule, RuleSet
+from app.parsers.azure_waf import AzureWAFParser
 from app.parsers.base import NormalizedRule, ParserRegistry, VendorType
 from app.parsers.detector import auto_detect_vendor
 from app.privacy import sanitize_azure_json, sanitize_azure_text
+
+
+def _infer_vendor_from_filename(filename: str, data: dict[str, Any]) -> VendorType | None:
+    normalized_filename = filename.lower()
+    if "waf" not in normalized_filename:
+        return None
+
+    waf_parser = AzureWAFParser()
+    if waf_parser.looks_like_ambiguous_log_export(data):
+        return VendorType.AZURE_WAF
+
+    return None
 
 
 async def upload_and_parse(
@@ -42,7 +55,14 @@ async def upload_and_parse(
         except (ValueError, KeyError):
             raise ValueError(f"Unknown vendor: {vendor_hint}. Supported: {', '.join(v.value for v in ParserRegistry.all_vendors())}")
     else:
-        parser, vendor = auto_detect_vendor(data)
+        try:
+            parser, vendor = auto_detect_vendor(data)
+        except ValueError:
+            inferred_vendor = _infer_vendor_from_filename(filename, data)
+            if inferred_vendor is None:
+                raise
+            vendor = inferred_vendor
+            parser = ParserRegistry.get(vendor)
 
     # Parse rules
     normalized_rules = parser.parse(data)
