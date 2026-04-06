@@ -1,17 +1,25 @@
 properties:
+  configuration:
+    secrets:
+      - name: openai-api-key
+        value: <replace-locally>
   template:
     containers:
       - name: flameguard-backend
-        image: flameguardacr.azurecr.io/flameguard-backend:v4
+        image: <registry>.azurecr.io/flameguard-backend:<tag>
         resources:
           cpu: 0.5
           memory: 1Gi
         env:
+          - name: LLM_PROVIDER
+            value: openai
+          - name: OPENAI_API_KEY
+            secretRef: openai-api-key
+          - name: LLM_MODEL
+            value: gpt-5.4-nano
           - name: CORS_ORIGINS
-            value: '["https://flameguard-frontend.ashyforest-99ee1f24.eastus.azurecontainerapps.io"]'
+            value: '["https://<your-frontend-hostname>"]'
           - name: DB_PATH
             value: /tmp/flameguard.db
           - name: FLAMEGUARD_DB_PATH
             value: /tmp/flameguard.db
-          - name: ANTHROPIC_API_KEY
-            value: placeholder

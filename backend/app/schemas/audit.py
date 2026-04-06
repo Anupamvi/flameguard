@@ -28,6 +28,9 @@ class AuditRequest(BaseModel):
     checks: list[str] = Field(default_factory=lambda: list(DEFAULT_CHECKS))
 
 
+FINDING_SOURCE = Literal["llm", "deterministic", "verified"]
+
+
 class FindingOut(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -38,6 +41,7 @@ class FindingOut(BaseModel):
     description: str
     recommendation: Optional[str] = None
     confidence: Optional[float] = None
+    source: FINDING_SOURCE = "llm"
     affected_rule_ids: list[str]
 
 
@@ -46,6 +50,9 @@ class AuditResponse(BaseModel):
 
     id: str
     ruleset_id: str
+    filename: str
+    vendor: str
+    rule_count: int
     status: AUDIT_STATUS
     summary: Optional[str] = None
     error_message: Optional[str] = None
@@ -66,3 +73,12 @@ class UploadResponse(BaseModel):
     rule_count: int
     vendor: str
     parse_warnings: list[str] = []
+
+
+class DeleteAuditsRequest(BaseModel):
+    audit_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class DeleteAuditsResponse(BaseModel):
+    deleted_audit_ids: list[str]
+    deleted_ruleset_ids: list[str]

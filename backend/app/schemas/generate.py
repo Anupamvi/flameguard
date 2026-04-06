@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -14,3 +14,16 @@ class RuleGenResponse(BaseModel):
     explanation: str
     warnings: list[str]
     is_valid: bool
+
+
+class FrontendRuleGenRequest(BaseModel):
+    description: str
+    vendor: str
+    severity: Literal["critical", "high", "medium", "low", "info"] = "medium"
+    category: str = "general"
+
+
+class FrontendRuleGenResponse(BaseModel):
+    rule: dict[str, Any]
+    explanation: str
+    confidence: float

@@ -10,6 +10,7 @@ from app.models.audit import AuditReport
 from app.models.rule import Rule, RuleSet
 from app.parsers.base import NormalizedRule, ParserRegistry, VendorType
 from app.parsers.detector import auto_detect_vendor
+from app.privacy import sanitize_azure_json, sanitize_azure_text
 
 
 async def upload_and_parse(
@@ -48,13 +49,15 @@ async def upload_and_parse(
     if not normalized_rules:
         parse_warnings.append("No rules found in the uploaded configuration")
 
+    sanitized_ruleset_json = sanitize_azure_json(data)
+
     # Create RuleSet
     ruleset_id = str(uuid.uuid4())
     ruleset = RuleSet(
         id=ruleset_id,
         filename=filename,
         vendor=vendor.value,
-        raw_json=raw_content,
+        raw_json=sanitized_ruleset_json,
         rule_count=len(normalized_rules),
     )
     db.add(ruleset)
@@ -64,7 +67,7 @@ async def upload_and_parse(
         rule = Rule(
             id=str(uuid.uuid4()),
             ruleset_id=ruleset_id,
-            original_id=nr.original_id,
+            original_id=sanitize_azure_text(nr.original_id) if nr.original_id else None,
             name=nr.name,
             action=nr.action.value,
             direction=nr.direction.value,
@@ -79,7 +82,7 @@ async def upload_and_parse(
             description=nr.description,
             enabled=nr.enabled,
             tags=json.dumps(nr.tags),
-            raw_json=json.dumps(nr.raw_json),
+            raw_json=sanitize_azure_json(nr.raw_json),
         )
         db.add(rule)
 

@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Upload, FileJson, Shield, BarChart3 } from "lucide-react";
 
 type UploadState = "idle" | "uploading" | "success" | "error";
 
@@ -42,21 +42,50 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+        <h2 className="fg-page-title">
           Upload Configuration
         </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Upload a firewall configuration file to start an audit
+        <p className="fg-page-subtitle">
+          Upload an Azure Firewall, NSG, or WAF JSON export, including supported Azure Firewall log exports
         </p>
+      </div>
+
+      {/* What this tool does */}
+      <div className="rounded-xl border border-white/[0.06] bg-gradient-to-br from-surface-700 to-surface-800 p-5">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-flame-500/10">
+            <Upload className="h-5 w-5 text-flame-400" />
+          </div>
+          <div>
+            <p className="fg-panel-title">Automated Security Audit</p>
+            <p className="fg-panel-body">
+              Upload your Azure resource JSON export and FlameGuard automatically parses the rules, runs AI-powered security analysis, maps findings against CIS &amp; NIST compliance frameworks, and generates a detailed risk report &mdash; all in seconds.
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-2.5 sm:grid-cols-3">
+          <div className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+            <FileJson className="h-4 w-4 text-flame-400 shrink-0" />
+            <span className="text-sm text-gray-400"><strong className="text-gray-300">Export:</strong> az network nsg show &rarr; JSON</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+            <Shield className="h-4 w-4 text-flame-400 shrink-0" />
+            <span className="text-sm text-gray-400"><strong className="text-gray-300">Analyze:</strong> AI scans every rule for risks</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+            <BarChart3 className="h-4 w-4 text-flame-400 shrink-0" />
+            <span className="text-sm text-gray-400"><strong className="text-gray-300">Report:</strong> Severity, compliance &amp; remediation</span>
+          </div>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Firewall Config</CardTitle>
+          <CardTitle>Firewall / NSG Config</CardTitle>
           <CardDescription>
-            Upload a JSON firewall configuration file for analysis
+            Upload a JSON firewall or NSG configuration file for analysis
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -68,11 +97,11 @@ export default function UploadPage() {
       </Card>
 
       {state === "error" && (
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
-          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+        <div className="flex items-start gap-3 rounded-lg border border-sev-critical/25 bg-sev-critical/[0.08] p-4">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-sev-critical" />
           <div>
-            <p className="text-sm font-medium text-red-800">Upload failed</p>
-            <p className="mt-1 text-sm text-red-600">{errorMessage}</p>
+            <p className="text-sm font-medium text-sev-critical">Upload failed</p>
+            <p className="mt-1 text-sm text-red-400">{errorMessage}</p>
           </div>
         </div>
       )}

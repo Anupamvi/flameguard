@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { connection } from "next/server";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
 import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,23 +20,22 @@ export const metadata: Metadata = {
   description: "LLM-powered firewall rule auditor and policy generator",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await connection();
+
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Providers>
-          <div className="flex min-h-screen">
+          <div className="flex min-h-screen bg-surface-900">
             <Sidebar />
-            <div className="ml-56 flex flex-1 flex-col">
-              <Header />
-              <main className="flex-1 bg-slate-50 p-6">{children}</main>
-            </div>
+            <main className="ml-56 flex-1 px-6 py-6 md:px-8 md:py-8">{children}</main>
           </div>
         </Providers>
       </body>

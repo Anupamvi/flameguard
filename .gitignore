@@ -21,6 +21,8 @@ ENV/
 
 # Environment
 .env
+.env.*
+!.env.example
 tokens/
 
 # Database
@@ -44,3 +46,10 @@ htmlcov/
 
 # Docker
 docker-compose.override.yml
+*.local.yml
+*.local.yaml
+*.secrets.yml
+*.secrets.yaml
+
+# Private sample data
+azure-exports/

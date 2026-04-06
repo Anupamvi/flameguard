@@ -33,11 +33,22 @@ async def upload_ruleset(
 ) -> UploadResponse:
     """Upload a firewall config file, parse it, and kick off the audit pipeline."""
 
+    # --- Validate file type ---
+    filename = file.filename or "unknown"
+    if not filename.lower().endswith(".json"):
+        raise HTTPException(400, "Only JSON files are accepted")
+    if file.content_type and file.content_type not in (
+        "application/json",
+        "text/json",
+        "application/octet-stream",
+    ):
+        raise HTTPException(400, "Only JSON files are accepted")
+
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, f"File too large. Maximum size: {settings.upload_max_size_mb}MB")
 
-    raw = content.decode("utf-8", errors="replace")
+    raw = content.decode("utf-8-sig", errors="replace")
 
     try:
         ruleset, audit, warnings = await upload_and_parse(
@@ -47,7 +58,8 @@ async def upload_ruleset(
             db=db,
         )
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        logger.warning("Upload parse error: %s", e)
+        raise HTTPException(400, "Unable to parse the uploaded file. Ensure it is a valid Azure firewall export.")
 
     # Kick off LLM audit in background
     background_tasks.add_task(run_audit_background, audit.id, ruleset.id)

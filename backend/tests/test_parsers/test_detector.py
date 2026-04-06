@@ -17,6 +17,10 @@ class TestAutoDetectVendor:
         parser, vendor = auto_detect_vendor(waf_data)
         assert vendor == VendorType.AZURE_WAF
 
+    def test_detects_firewall_log_export(self, firewall_log_export_normalized):
+        parser, vendor = auto_detect_vendor(firewall_log_export_normalized)
+        assert vendor == VendorType.AZURE_FIREWALL
+
     def test_raises_on_unknown(self):
         with pytest.raises(ValueError, match="Unrecognized"):
             auto_detect_vendor({"foo": "bar"})

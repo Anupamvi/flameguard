@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.deterministic import DeterministicFinding, run_deterministic_checks
 from app.compliance.engine import get_compliance_engine
 from app.llm.chunker import RuleSetChunker
 from app.llm.client import ClaudeClient
@@ -96,6 +97,55 @@ def _deduplicate_findings(findings: list[dict]) -> list[dict]:
     return merged
 
 
+def _cross_reference_findings(
+    llm_findings: list[dict],
+    det_findings: list[DeterministicFinding],
+    name_to_rule_id: dict[str, str],
+) -> list[dict]:
+    """Cross-reference LLM and deterministic findings.
+
+    - LLM findings that match a deterministic finding → source="verified"
+    - LLM-only findings → source="llm"
+    - Deterministic findings with no LLM match → added as source="deterministic"
+    """
+    # Build a set of (category, frozenset(rule_names)) for each LLM finding
+    # to check for overlap
+    det_matched: set[int] = set()  # indices of det findings matched to LLM
+
+    for lf in llm_findings:
+        lf.setdefault("source", "llm")
+        lf_rules = set(lf.get("affected_rules", []))
+
+        for di, df in enumerate(det_findings):
+            if df.category != lf["category"]:
+                continue
+            df_rules = set(df.affected_rules)
+            if lf_rules & df_rules:
+                # Both engines agree on the same rules + category → verified
+                lf["source"] = "verified"
+                lf["confidence"] = 1.0  # deterministic confirmation
+                det_matched.add(di)
+                break
+
+    # Add deterministic-only findings that the LLM missed
+    for di, df in enumerate(det_findings):
+        if di in det_matched:
+            continue
+        llm_dict = {
+            "severity": df.severity,
+            "category": df.category,
+            "title": f"[Auto] {df.title}",
+            "description": df.description,
+            "recommendation": df.recommendation,
+            "confidence": df.confidence,
+            "affected_rules": df.affected_rules,
+            "source": "deterministic",
+        }
+        llm_findings.append(llm_dict)
+
+    return llm_findings
+
+
 class AuditPipeline:
     """Orchestrates the full audit: chunk -> LLM analyze -> deduplicate -> score -> store."""
 
@@ -175,6 +225,10 @@ class AuditPipeline:
             # 5. Merge & deduplicate
             all_findings = _deduplicate_findings(all_findings)
 
+            # 5b. Run deterministic checks and cross-reference with LLM findings
+            det_findings = run_deterministic_checks(normalized)
+            all_findings = _cross_reference_findings(all_findings, det_findings, name_to_rule_id)
+
             # 6. Risk scoring pass (second Claude call)
             await self._update_status(audit_id, "scoring")
 
@@ -218,6 +272,7 @@ class AuditPipeline:
                     description=f["description"],
                     recommendation=f.get("recommendation"),
                     confidence=f.get("confidence"),
+                    source=f.get("source", "llm"),
                 )
                 self.db.add(finding)
 

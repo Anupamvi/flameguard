@@ -2,77 +2,92 @@
 
 export interface RuleOut {
   id: string;
-  ruleset_id: string;
+  original_id: string;
   name: string;
+  vendor: string;
+  action: string;
+  direction: string;
+  protocol: string | null;
+  source_addresses: string[];
+  source_ports: string[];
+  destination_addresses: string[];
+  destination_ports: string[];
+  priority: number | null;
+  collection_name: string | null;
+  collection_priority: number | null;
   description: string;
-  severity: "critical" | "high" | "medium" | "low" | "info";
-  category: string;
-  logic: string;
   enabled: boolean;
-  created_at: string;
-  updated_at: string;
+  risk_score: number | null;
+  tags: Record<string, string>;
 }
 
 export interface RuleSetOut {
   id: string;
-  name: string;
-  description: string;
+  filename: string;
   vendor: string;
-  version: string;
-  rules: RuleOut[];
-  created_at: string;
-  updated_at: string;
+  rule_count: number;
+  uploaded_at: string;
 }
 
 export interface RuleExplainResponse {
   rule_id: string;
-  rule_name: string;
-  plain_english: string;
-  risk_assessment: string;
-  remediation: string;
+  explanation: string;
+  concerns: string[];
 }
 
 export interface FindingOut {
   id: string;
-  audit_id: string;
-  rule_id: string;
-  rule_name: string;
   severity: "critical" | "high" | "medium" | "low" | "info";
-  message: string;
-  line_number: number | null;
-  context: string | null;
-  remediation: string | null;
-  created_at: string;
+  category: string;
+  title: string;
+  description: string;
+  recommendation: string | null;
+  confidence: number | null;
+  source: "llm" | "deterministic" | "verified";
+  affected_rule_ids: string[];
 }
 
 export interface AuditResponse {
   id: string;
+  ruleset_id: string;
   filename: string;
   vendor: string;
-  status: "pending" | "running" | "completed" | "failed";
+  rule_count: number;
+  status: "pending" | "parsing" | "auditing" | "scoring" | "completed" | "failed";
+  summary: string | null;
+  error_message: string | null;
   findings: FindingOut[];
-  summary: Record<string, number>;
+  total_findings: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
   created_at: string;
   completed_at: string | null;
 }
 
 export interface UploadResponse {
+  ruleset_id: string;
   audit_id: string;
-  filename: string;
-  vendor: string;
   status: string;
-  message: string;
+  rule_count: number;
+  vendor: string;
+  parse_warnings: string[];
+}
+
+export interface DeleteAuditsResponse {
+  deleted_audit_ids: string[];
+  deleted_ruleset_ids: string[];
 }
 
 export interface ComplianceCheckOut {
   id: string;
-  audit_id: string;
   framework: string;
   control_id: string;
-  control_name: string;
-  status: "pass" | "fail" | "partial" | "not_applicable";
-  details: string;
-  created_at: string;
+  control_title: string;
+  status: "pass" | "fail" | "not_applicable";
+  evidence: string | null;
+  affected_rule_ids: string[];
 }
 
 export interface ComplianceSummary {
@@ -80,9 +95,7 @@ export interface ComplianceSummary {
   total_controls: number;
   passed: number;
   failed: number;
-  partial: number;
   not_applicable: number;
-  score: number;
   checks: ComplianceCheckOut[];
 }
 

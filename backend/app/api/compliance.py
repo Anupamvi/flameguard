@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -103,6 +104,10 @@ async def get_compliance(
     db: AsyncSession = Depends(get_db),
 ) -> list[ComplianceSummary]:
     """Get compliance summary for an audit, grouped by framework."""
+    try:
+        uuid.UUID(audit_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Invalid audit_id format")
     # Verify audit exists
     report = await db.get(AuditReport, audit_id)
     if not report:

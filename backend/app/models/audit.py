@@ -53,6 +53,7 @@ class AuditFinding(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     recommendation: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(20), default="llm")  # "llm", "deterministic", "verified" (both agree)
 
     audit_report: Mapped["AuditReport"] = relationship(back_populates="findings")
 

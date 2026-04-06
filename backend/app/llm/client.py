@@ -1,18 +1,19 @@
-"""Claude API wrapper — supports both direct Anthropic API and Azure AI Foundry."""
+"""LLM API wrapper — supports OpenAI direct API and Azure AI Foundry (OpenAI-compatible)."""
 
 from __future__ import annotations
 
-import anthropic
+from typing import Any
+
+from openai import AzureOpenAI, OpenAI
 
 from app.config import settings
 
 
-def _build_client() -> anthropic.Anthropic:
-    """Create the appropriate Anthropic client based on LLM_PROVIDER setting.
+def _build_client() -> OpenAI | AzureOpenAI:
+    """Create the appropriate OpenAI client based on LLM_PROVIDER setting.
 
-    - "anthropic": Direct Anthropic API (requires ANTHROPIC_API_KEY)
-    - "azure": Azure AI Foundry / Azure AI Model Catalog
-              (requires AZURE_ENDPOINT, and optionally AZURE_API_KEY)
+    - "openai": Direct OpenAI API (requires OPENAI_API_KEY)
+    - "azure": Azure AI Foundry (requires AZURE_ENDPOINT and AZURE_API_KEY)
     """
     if settings.llm_provider == "azure":
         if not settings.azure_endpoint:
@@ -21,83 +22,86 @@ def _build_client() -> anthropic.Anthropic:
                 "Set it to your Azure AI Foundry endpoint, e.g. "
                 "https://<resource>.services.ai.azure.com"
             )
-
-        # Azure AI Foundry with API key auth
-        if settings.azure_api_key:
-            return anthropic.AnthropicAzure(
-                azure_endpoint=settings.azure_endpoint,
-                azure_api_key=settings.azure_api_key,
-                azure_api_version=settings.azure_api_version,
-            )
-
-        # Azure AI Foundry with Entra ID / DefaultAzureCredential (keyless)
-        # Requires: pip install azure-identity
-        try:
-            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        except ImportError:
+        if not settings.azure_api_key:
             raise RuntimeError(
-                "AZURE_API_KEY is not set and azure-identity is not installed. "
-                "Either set AZURE_API_KEY or install azure-identity: "
-                "pip install azure-identity"
+                "LLM_PROVIDER is 'azure' but AZURE_API_KEY is not set."
             )
-
-        credential = DefaultAzureCredential()
-        token_provider = get_bearer_token_provider(
-            credential, "https://cognitiveservices.azure.com/.default"
-        )
-        return anthropic.AnthropicAzure(
+        return AzureOpenAI(
             azure_endpoint=settings.azure_endpoint,
-            azure_ad_token_provider=token_provider,
-            azure_api_version=settings.azure_api_version,
+            api_key=settings.azure_api_key,
+            api_version=settings.azure_api_version,
         )
 
-    # Default: direct Anthropic API
-    if not settings.anthropic_api_key:
+    # Default: direct OpenAI API
+    if not settings.openai_api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set. "
+            "OPENAI_API_KEY is not set. "
             "Please add it to your .env file or set it as an environment variable. "
             "Alternatively, set LLM_PROVIDER=azure to use Azure AI Foundry."
         )
-    return anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    return OpenAI(api_key=settings.openai_api_key)
 
 
-class ClaudeClient:
-    """Thin wrapper around the Anthropic Python SDK.
+class LLMClient:
+    """Thin wrapper around the OpenAI Python SDK.
 
-    Automatically uses the correct backend (Anthropic or Azure AI Foundry)
+    Automatically uses the correct backend (OpenAI or Azure AI Foundry)
     based on the LLM_PROVIDER environment variable.
     """
 
     def __init__(self) -> None:
         self.client = _build_client()
-        self.model = settings.claude_model
+        self.model = settings.llm_model
 
-    async def analyze(self, system: str, user: str, max_tokens: int = 4096) -> str:
-        """Call Claude and return the text response.
+    async def analyze(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
+        """Call the LLM and return the text response."""
+        request_args: dict[str, Any] = {
+            "model": self.model,
+            "max_completion_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if response_format is not None:
+            request_args["response_format"] = response_format
 
-        Uses the sync client in an async context -- acceptable for background
-        pipeline work where we are not blocking the request thread.
-        """
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        response = self.client.chat.completions.create(
+            **request_args,
         )
-        return response.content[0].text
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError("LLM returned empty content (None)")
+        return content
 
     def stream(
         self,
         system: str,
-        user: str,
+        user: str | None = None,
         messages: list[dict] | None = None,
         max_tokens: int = 4096,
     ):
-        """Return a streaming response context-manager for SSE chat."""
-        msgs = messages or [{"role": "user", "content": user}]
-        return self.client.messages.stream(
+        """Return a streaming response for SSE chat."""
+        msgs = [{"role": "system", "content": system}]
+        if messages:
+            msgs.extend(messages)
+        else:
+            if user is None:
+                raise ValueError("user is required when messages are not provided")
+            msgs.append({"role": "user", "content": user})
+        return self.client.chat.completions.create(
             model=self.model,
-            max_tokens=max_tokens,
-            system=system,
+            max_completion_tokens=max_tokens,
             messages=msgs,
+            stream=True,
         )
+
+
+# Keep backward-compatible alias
+ClaudeClient = LLMClient

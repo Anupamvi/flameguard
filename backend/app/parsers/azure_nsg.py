@@ -31,6 +31,9 @@ class AzureNSGParser(BaseParser):
         for r in data.get("resources", []):
             if r.get("type") == self._RESOURCE_TYPE:
                 return True
+        # Flat Azure CLI export (az network nsg show)
+        if "securityRules" in data or "defaultSecurityRules" in data:
+            return True
         return False
 
     def parse(self, data: dict[str, Any]) -> list[NormalizedRule]:
@@ -96,11 +99,28 @@ class AzureNSGParser(BaseParser):
     def _extract_nsg_resources(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract NSG resource(s) from either direct export or ARM template."""
         if data.get("type") == self._RESOURCE_TYPE:
-            return [data]
-        return [r for r in data.get("resources", []) if r.get("type") == self._RESOURCE_TYPE]
+            # ARM-style with nested properties dict
+            if "properties" in data:
+                return [data]
+            # Flat Azure CLI export (`az network nsg show`) has type but
+            # rules sit at the top level instead of under properties.
+            return [{"properties": {
+                "securityRules": data.get("securityRules", []),
+                "defaultSecurityRules": data.get("defaultSecurityRules", []),
+            }}]
+        arm = [r for r in data.get("resources", []) if r.get("type") == self._RESOURCE_TYPE]
+        if arm:
+            return arm
+        # Flat Azure CLI export without type field
+        if "securityRules" in data or "defaultSecurityRules" in data:
+            return [{"properties": {
+                "securityRules": data.get("securityRules", []),
+                "defaultSecurityRules": data.get("defaultSecurityRules", []),
+            }}]
+        return []
 
     def _parse_rule(self, sr: dict[str, Any], is_default: bool = False) -> NormalizedRule | None:
-        props = sr.get("properties", {})
+        props = sr.get("properties") or sr  # flat CLI exports have props at rule level
         access = props.get("access", "Deny").lower()
         direction = props.get("direction", "Inbound").lower()
 

@@ -1,6 +1,7 @@
 import type {
   AuditResponse,
   ComplianceSummary,
+  DeleteAuditsResponse,
   RuleExplainResponse,
   RuleGenRequest,
   RuleGenResponse,
@@ -70,7 +71,7 @@ export const api = {
     formData.append("file", file);
     if (vendorHint) formData.append("vendor_hint", vendorHint);
 
-    const url = `${BASE_URL}/audits/upload`;
+    const url = `${BASE_URL}/upload`;
     const res = await fetch(url, {
       method: "POST",
       body: formData,
@@ -95,7 +96,7 @@ export const api = {
 
   /** Fetch a single audit by ID. */
   getAudit(id: string): Promise<AuditResponse> {
-    return apiFetch<AuditResponse>(`/audits/${id}`);
+    return apiFetch<AuditResponse>(`/audit/${id}`);
   },
 
   /** List audits with optional pagination. */
@@ -103,6 +104,21 @@ export const api = {
     return apiFetch<AuditResponse[]>(
       `/audits?page=${page}&per_page=${perPage}`,
     );
+  },
+
+  /** Delete a single audit. */
+  deleteAudit(auditId: string): Promise<DeleteAuditsResponse> {
+    return apiFetch<DeleteAuditsResponse>(`/audit/${auditId}`, {
+      method: "DELETE",
+    });
+  },
+
+  /** Delete multiple audits. */
+  deleteAudits(auditIds: string[]): Promise<DeleteAuditsResponse> {
+    return apiFetch<DeleteAuditsResponse>("/audits", {
+      method: "DELETE",
+      body: JSON.stringify({ audit_ids: auditIds }),
+    });
   },
 
   /** Get rules belonging to a ruleset. */
@@ -118,7 +134,7 @@ export const api = {
   /** Get compliance summary for an audit. */
   getCompliance(auditId: string): Promise<ComplianceSummary[]> {
     return apiFetch<ComplianceSummary[]>(
-      `/audits/${auditId}/compliance`,
+      `/audit/${auditId}/compliance`,
     );
   },
 

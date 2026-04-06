@@ -48,3 +48,24 @@ class TestAzureFirewallParser:
         assert generated["ruleType"] == "NetworkRule"
         assert "name" in generated
         assert "ipProtocols" in generated
+
+    def test_can_parse_normalized_log_export(self, firewall_log_export_normalized):
+        assert self.parser.can_parse(firewall_log_export_normalized) is True
+
+    def test_can_parse_raw_log_export(self, firewall_log_export_raw):
+        assert self.parser.can_parse(firewall_log_export_raw) is True
+
+    def test_parse_normalized_log_export_returns_observed_rules(self, firewall_log_export_normalized):
+        rules = self.parser.parse(firewall_log_export_normalized)
+        assert len(rules) == 3
+        assert {rule.tags.get("rule_type") for rule in rules} == {
+            "DnsQueryLog",
+            "ApplicationRuleLog",
+            "ObservedTrafficLog",
+        }
+        assert any(rule.action == RuleAction.LOG for rule in rules)
+
+    def test_parse_raw_log_export_returns_observed_rules(self, firewall_log_export_raw):
+        rules = self.parser.parse(firewall_log_export_raw)
+        assert len(rules) == 3
+        assert all(rule.vendor == VendorType.AZURE_FIREWALL for rule in rules)

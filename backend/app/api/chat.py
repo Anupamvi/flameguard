@@ -1,9 +1,12 @@
-"""POST /audit/{audit_id}/chat -- SSE streaming chat about audit findings."""
+"""POST /audit/{audit_id}/chat -- SSE streaming chat about audit findings.
+   POST /chat/general       -- SSE streaming general firewall policy chat.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -61,9 +64,17 @@ async def chat_about_audit(
 ):
     """Chat with the AI about audit findings. Returns an SSE stream."""
 
-    # --- Validate API key ---
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
+    # --- Validate audit_id format ---
+    try:
+        uuid.UUID(audit_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid audit_id format")
+
+    # --- Validate LLM config ---
+    if settings.llm_provider == "azure" and not settings.azure_api_key:
+        raise HTTPException(status_code=503, detail="LLM service is not configured")
+    if settings.llm_provider == "openai" and not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="LLM service is not configured")
 
     # --- Load audit report ---
     result = await db.execute(
@@ -122,13 +133,15 @@ async def chat_about_audit(
     async def event_generator():
         full_response = ""
         try:
-            with llm.stream(system=system_prompt, messages=conversation) as stream:
-                for text in stream.text_stream:
-                    full_response += text
-                    yield {"data": json.dumps({"content": text})}
+            stream = llm.stream(system=system_prompt, messages=conversation)
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    full_response += delta.content
+                    yield {"data": json.dumps({"content": delta.content})}
         except Exception as exc:
             logger.error("LLM streaming error: %s", exc)
-            yield {"data": json.dumps({"error": str(exc)})}
+            yield {"data": json.dumps({"error": "An error occurred while processing your request"})}
             return
 
         # Save assistant message to DB after stream completes
@@ -142,6 +155,58 @@ async def chat_about_audit(
                 db.add(assistant_msg)
         except Exception as exc:
             logger.error("Failed to save assistant message: %s", exc)
+
+        yield {"data": json.dumps({"done": True, "full_content": full_response})}
+
+    return EventSourceResponse(event_generator())
+
+
+# ---------------------------------------------------------------------------
+# General (no-audit) chat
+# ---------------------------------------------------------------------------
+
+SYSTEM_GENERAL = """\
+You are FlameGuard, an expert firewall and network security policy assistant. \
+You help security engineers with:
+- Firewall rule design and best practices (Azure NSG, Azure Firewall, AWS SG, Palo Alto, etc.)
+- Network segmentation strategies and zero-trust architectures
+- Compliance frameworks (CIS, PCI DSS, NIST, SOC 2) as they relate to network security
+- Troubleshooting connectivity issues caused by firewall rules
+- Explaining security concepts in plain English
+
+Be concise, specific, and actionable. When discussing rules, use concrete examples \
+with realistic IP ranges and ports. If the user asks about a specific vendor, give \
+vendor-specific guidance. If they ask you to generate rules, tell them to use the \
+Rule Generator page for vendor-specific output.
+"""
+
+
+@router.post("/chat/general")
+async def general_chat(request: ChatRequest):
+    """General firewall policy chat — no audit context required. Returns SSE stream."""
+
+    # Validate LLM config
+    if settings.llm_provider == "azure" and not settings.azure_api_key:
+        raise HTTPException(status_code=503, detail="LLM service is not configured")
+    if settings.llm_provider == "openai" and not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="LLM service is not configured")
+
+    llm = ClaudeClient()
+    conversation = [{"role": "user", "content": request.message}]
+
+    async def event_generator():
+        full_response = ""
+        try:
+            stream = llm.stream(system=SYSTEM_GENERAL, messages=conversation)
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    full_response += delta.content
+                    yield {"data": json.dumps({"content": delta.content})}
+        except Exception as exc:
+            logger.error("General chat LLM error: %s", exc)
+            yield {"data": json.dumps({"error": "An error occurred while processing your request"})}
+            return
 
         yield {"data": json.dumps({"done": True, "full_content": full_response})}
 

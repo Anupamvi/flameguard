@@ -17,19 +17,23 @@ interface RuleTableProps {
   rules: RuleOut[];
 }
 
-function severityColor(severity: string) {
-  switch (severity) {
-    case "critical":
-      return "bg-red-100 text-red-800";
-    case "high":
-      return "bg-orange-100 text-orange-800";
-    case "medium":
-      return "bg-yellow-100 text-yellow-800";
-    case "low":
-      return "bg-blue-100 text-blue-800";
+function actionColor(action: string) {
+  switch (action) {
+    case "allow":
+      return "bg-sev-pass/10 text-sev-pass";
+    case "deny":
+      return "bg-sev-critical/10 text-sev-critical";
     default:
-      return "bg-gray-100 text-gray-800";
+      return "bg-gray-500/10 text-gray-400";
   }
+}
+
+function formatList(values: string[]) {
+  return values.length > 0 ? values.join(", ") : "Any";
+}
+
+function formatEndpoint(addresses: string[], ports: string[]) {
+  return `${formatList(addresses)}:${formatList(ports)}`;
 }
 
 export function RuleTable({ rules }: RuleTableProps) {
@@ -43,7 +47,7 @@ export function RuleTable({ rules }: RuleTableProps) {
 
   if (rules.length === 0) {
     return (
-      <div className="flex h-32 items-center justify-center text-sm text-slate-500">
+      <div className="flex h-32 items-center justify-center text-sm text-gray-500">
         No rules found for this audit.
       </div>
     );
@@ -51,15 +55,17 @@ export function RuleTable({ rules }: RuleTableProps) {
 
   return (
     <>
-      <div className="rounded-lg border border-slate-200 bg-white">
+      <div className="rounded-lg border border-white/[0.06] bg-surface-700">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Severity</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Enabled</TableHead>
-              <TableHead>Description</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Direction</TableHead>
+              <TableHead>Protocol</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Destination</TableHead>
+              <TableHead>Priority</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -69,24 +75,39 @@ export function RuleTable({ rules }: RuleTableProps) {
                 className="cursor-pointer"
                 onClick={() => handleRowClick(rule)}
               >
-                <TableCell className="font-medium">{rule.name}</TableCell>
                 <TableCell>
-                  <Badge className={severityColor(rule.severity)}>
-                    {rule.severity}
-                  </Badge>
+                  <div className="text-base font-medium text-gray-100">{rule.name}</div>
+                  {rule.description && (
+                    <div className="mt-1 max-w-[260px] truncate text-sm text-gray-500">
+                      {rule.description}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline">{rule.category}</Badge>
+                  <Badge className={actionColor(rule.action)}>{rule.action}</Badge>
                 </TableCell>
                 <TableCell>
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${
-                      rule.enabled ? "bg-green-500" : "bg-slate-300"
-                    }`}
-                  />
+                  <Badge variant="outline">{rule.direction}</Badge>
                 </TableCell>
-                <TableCell className="max-w-[300px] truncate text-slate-600">
-                  {rule.description}
+                <TableCell className="text-gray-400">{rule.protocol ?? "Any"}</TableCell>
+                <TableCell>
+                  <div
+                    className="max-w-[220px] truncate text-gray-400"
+                    title={formatEndpoint(rule.source_addresses, rule.source_ports)}
+                  >
+                    {formatEndpoint(rule.source_addresses, rule.source_ports)}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div
+                    className="max-w-[220px] truncate text-gray-400"
+                    title={formatEndpoint(rule.destination_addresses, rule.destination_ports)}
+                  >
+                    {formatEndpoint(rule.destination_addresses, rule.destination_ports)}
+                  </div>
+                </TableCell>
+                <TableCell className="text-gray-400">
+                  {rule.priority ?? "default"}
                 </TableCell>
               </TableRow>
             ))}

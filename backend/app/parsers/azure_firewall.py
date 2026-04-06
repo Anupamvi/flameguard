@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
 from typing import Any
 
 from app.parsers.base import (
@@ -26,6 +27,18 @@ class AzureFirewallParser(BaseParser):
 
     _POLICY_RCG_TYPE = "Microsoft.Network/firewallPolicies/ruleCollectionGroups"
     _CLASSIC_TYPE = "Microsoft.Network/azureFirewalls"
+    _LOG_EXPORT_KEYS = ("dnsSamples", "applicationSamples", "diagnosticsSamples")
+    _FIREWALL_LOG_TYPES = {
+        "AZFWApplicationRule",
+        "AZFWDnsQuery",
+        "AZFWFatFlow",
+        "AZFWFlowTrace",
+        "AZFWIdpsSignature",
+        "AZFWNatRule",
+        "AZFWNetworkRule",
+        "AZFWThreatIntel",
+        "AzureDiagnostics",
+    }
 
     def can_parse(self, data: dict[str, Any]) -> bool:
         rtype = data.get("type", "")
@@ -37,10 +50,17 @@ class AzureFirewallParser(BaseParser):
         # Array of rule collection groups
         if isinstance(data.get("value"), list):
             return any(v.get("type") == self._POLICY_RCG_TYPE for v in data["value"])
+        if self._contains_firewall_log_rows(self._extract_log_rows(data)):
+            return True
+        if self._looks_like_log_export(data):
+            return True
         return False
 
     def parse(self, data: dict[str, Any]) -> list[NormalizedRule]:
         rules: list[NormalizedRule] = []
+
+        if self._contains_firewall_log_rows(self._extract_log_rows(data)) or self._looks_like_log_export(data):
+            return self._parse_log_export(data)
 
         # Direct resource
         rtype = data.get("type", "")
@@ -58,6 +78,279 @@ class AzureFirewallParser(BaseParser):
                     rules.extend(self._parse_classic(r))
 
         return rules
+
+    def _parse_log_export(self, data: dict[str, Any]) -> list[NormalizedRule]:
+        direct_rows = self._extract_log_rows(data)
+        if self._contains_firewall_log_rows(direct_rows):
+            return self._parse_log_rows(direct_rows)
+
+        rules: list[NormalizedRule] = []
+        for key in self._LOG_EXPORT_KEYS:
+            rows = self._extract_log_rows(data.get(key))
+            rules.extend(self._parse_log_rows(rows))
+        return rules
+
+    def _parse_log_rows(self, rows: list[dict[str, Any]]) -> list[NormalizedRule]:
+        rules: list[NormalizedRule] = []
+        for row in rows:
+            if self._is_dns_log_row(row):
+                rules.append(self._parse_dns_log_row(row))
+                continue
+            if self._is_application_log_row(row):
+                rules.append(self._parse_application_log_row(row))
+                continue
+            if self._looks_like_firewall_log_row(row):
+                rules.append(self._parse_generic_log_row(row))
+        return rules
+
+    def _parse_dns_log_row(self, row: dict[str, Any]) -> NormalizedRule:
+        query_name = self._trim(str(row.get("QueryName") or "observed-dns-query"))
+        query_type = str(row.get("QueryType") or "DNS")
+        response_code = str(row.get("ResponseCode") or "")
+        time_generated = str(row.get("TimeGenerated") or "")
+
+        description_parts = [f"Observed DNS query ({query_type})"]
+        if response_code:
+            description_parts.append(f"response={response_code}")
+        if time_generated:
+            description_parts.append(f"time={time_generated}")
+
+        return NormalizedRule(
+            original_id=self._build_log_id("dns", row.get("QueryId"), time_generated),
+            name=self._trim(f"DNS query {query_name}"),
+            vendor=VendorType.AZURE_FIREWALL,
+            action=RuleAction.LOG,
+            direction=RuleDirection.OUTBOUND,
+            protocol=self._normalize_protocol(row.get("Protocol")),
+            source_addresses=self._list_value(row.get("SourceIp")),
+            source_ports=self._list_value(row.get("SourcePort"), default="53"),
+            destination_addresses=[query_name],
+            destination_ports=["53"],
+            description="; ".join(description_parts),
+            enabled=True,
+            raw_json=row,
+            tags={
+                "rule_type": "DnsQueryLog",
+                "log_type": str(row.get("Type") or "AZFWDnsQuery"),
+                "response_code": response_code or "unknown",
+            },
+        )
+
+    def _parse_application_log_row(self, row: dict[str, Any]) -> NormalizedRule:
+        destination = self._first_non_empty(row, "Fqdn", "TargetUrl", "DestinationIp", "DestinationIp_s") or "*"
+        action = self._coerce_rule_action(row.get("Action"), default=RuleAction.LOG)
+        rule_name = self._first_non_empty(row, "Rule")
+        collection = self._first_non_empty(row, "RuleCollection")
+        group = self._first_non_empty(row, "RuleCollectionGroup")
+        policy = self._first_non_empty(row, "Policy")
+        time_generated = str(row.get("TimeGenerated") or "")
+        description_parts = [f"Observed application traffic to {destination}"]
+        if action != RuleAction.LOG:
+            description_parts.append(f"action={action.value}")
+        if time_generated:
+            description_parts.append(f"time={time_generated}")
+
+        return NormalizedRule(
+            original_id=self._build_log_id("app", rule_name or destination, time_generated),
+            name=self._trim(rule_name or f"Observed app traffic to {destination}"),
+            vendor=VendorType.AZURE_FIREWALL,
+            action=action,
+            direction=RuleDirection.OUTBOUND,
+            protocol=self._normalize_protocol(row.get("Protocol")),
+            source_addresses=self._list_value(row.get("SourceIp")),
+            source_ports=self._list_value(row.get("SourcePort"), default="*"),
+            destination_addresses=[self._trim(destination)],
+            destination_ports=self._list_value(row.get("DestinationPort"), default="443"),
+            collection_name=self._trim(collection) if collection else None,
+            description="; ".join(description_parts),
+            enabled=True,
+            raw_json=row,
+            tags={
+                "rule_type": "ApplicationRuleLog",
+                "log_type": str(row.get("Type") or "AZFWApplicationRule"),
+                "group": group or "",
+                "collection": collection or "",
+                "policy": policy or "",
+            },
+        )
+
+    def _parse_generic_log_row(self, row: dict[str, Any]) -> NormalizedRule:
+        source = self._first_non_empty(row, "SourceIp", "SourceIP") or "*"
+        destination = self._first_non_empty(
+            row,
+            "Fqdn",
+            "Fqdn_s",
+            "TargetUrl",
+            "TargetUrl_s",
+            "DestinationIp",
+            "DestinationIp_s",
+        ) or "*"
+        action = self._coerce_rule_action(row.get("Action") or row.get("Action_s"), default=RuleAction.LOG)
+        category = self._first_non_empty(row, "Category", "Type") or "AzureFirewallLog"
+        rule_name = self._first_non_empty(row, "Rule", "Rule_s")
+        collection = self._first_non_empty(row, "RuleCollection", "RuleCollection_s")
+        group = self._first_non_empty(row, "RuleCollectionGroup", "RuleCollectionGroup_s")
+        policy = self._first_non_empty(row, "Policy", "Policy_s")
+        reason = self._first_non_empty(row, "ActionReason", "ActionReason_s", "msg_s", "ResultDescription")
+        time_generated = str(row.get("TimeGenerated") or "")
+
+        description_parts = [f"Observed {category} traffic"]
+        if reason:
+            description_parts.append(reason)
+        if time_generated:
+            description_parts.append(f"time={time_generated}")
+
+        return NormalizedRule(
+            original_id=self._build_log_id("log", rule_name or category, time_generated),
+            name=self._trim(rule_name or f"Observed {category} traffic"),
+            vendor=VendorType.AZURE_FIREWALL,
+            action=action,
+            direction=self._coerce_direction(row, source, destination),
+            protocol=self._normalize_protocol(row.get("Protocol") or row.get("Protocol_s")),
+            source_addresses=[source],
+            source_ports=self._list_value(row.get("SourcePort") or row.get("SourcePort_d"), default="*"),
+            destination_addresses=[self._trim(destination)],
+            destination_ports=self._list_value(row.get("DestinationPort") or row.get("DestinationPort_d"), default="*"),
+            collection_name=self._trim(collection) if collection else None,
+            description="; ".join(description_parts),
+            enabled=True,
+            raw_json=row,
+            tags={
+                "rule_type": "ObservedTrafficLog",
+                "log_type": category,
+                "group": group or "",
+                "collection": collection or "",
+                "policy": policy or "",
+            },
+        )
+
+    def _looks_like_log_export(self, data: dict[str, Any]) -> bool:
+        if not any(key in data for key in self._LOG_EXPORT_KEYS):
+            return False
+        if any(self._contains_firewall_log_rows(self._extract_log_rows(data.get(key))) for key in self._LOG_EXPORT_KEYS):
+            return True
+        return bool(data.get("workspaceCustomerId") or data.get("workspace"))
+
+    def _contains_firewall_log_rows(self, rows: list[dict[str, Any]]) -> bool:
+        return any(self._looks_like_firewall_log_row(row) for row in rows)
+
+    def _looks_like_firewall_log_row(self, row: dict[str, Any]) -> bool:
+        row_type = str(row.get("Type") or row.get("Category") or "")
+        if row_type in self._FIREWALL_LOG_TYPES:
+            return True
+        if row.get("QueryName") and row.get("SourceIp"):
+            return True
+        if (row.get("Fqdn") or row.get("TargetUrl")) and row.get("SourceIp"):
+            return True
+        if (row.get("SourceIP") or row.get("SourceIp")) and (row.get("DestinationIp_s") or row.get("DestinationIp")):
+            return True
+        return False
+
+    def _is_dns_log_row(self, row: dict[str, Any]) -> bool:
+        return str(row.get("Type") or "") == "AZFWDnsQuery" or bool(row.get("QueryName"))
+
+    def _is_application_log_row(self, row: dict[str, Any]) -> bool:
+        row_type = str(row.get("Type") or "")
+        return row_type == "AZFWApplicationRule" or bool(row.get("Fqdn") or row.get("TargetUrl"))
+
+    def _extract_log_rows(self, section: Any) -> list[dict[str, Any]]:
+        if isinstance(section, list):
+            return [item for item in section if isinstance(item, dict)]
+        if not isinstance(section, dict):
+            return []
+        if isinstance(section.get("tables"), list):
+            rows: list[dict[str, Any]] = []
+            for table in section["tables"]:
+                rows.extend(self._table_to_rows(table))
+            return rows
+        if isinstance(section.get("rows"), list) and isinstance(section.get("columns"), list):
+            return self._table_to_rows(section)
+        return []
+
+    def _table_to_rows(self, table: dict[str, Any]) -> list[dict[str, Any]]:
+        columns = [str(column.get("name") or f"col_{idx}") for idx, column in enumerate(table.get("columns", []))]
+        rows: list[dict[str, Any]] = []
+        for raw_row in table.get("rows", []):
+            if isinstance(raw_row, dict):
+                rows.append(raw_row)
+                continue
+            if not isinstance(raw_row, list):
+                continue
+            item = {
+                columns[idx]: raw_row[idx] if idx < len(raw_row) else None
+                for idx in range(len(columns))
+            }
+            rows.append(item)
+        return rows
+
+    def _coerce_rule_action(self, value: Any, default: RuleAction = RuleAction.LOG) -> RuleAction:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return default
+        if normalized in RuleAction._value2member_map_:
+            return RuleAction(normalized)
+        if normalized in {"allowed", "allow"}:
+            return RuleAction.ALLOW
+        if normalized in {"blocked", "block", "deny", "denied", "drop", "dropped", "reject", "rejected"}:
+            return RuleAction.DENY
+        if normalized in {"log", "logged"}:
+            return RuleAction.LOG
+        return default
+
+    def _coerce_direction(self, row: dict[str, Any], source: str, destination: str) -> RuleDirection:
+        raw_direction = str(row.get("direction_s") or "").strip().lower()
+        if raw_direction in RuleDirection._value2member_map_:
+            return RuleDirection(raw_direction)
+        if row.get("Fqdn") or row.get("TargetUrl") or row.get("QueryName"):
+            return RuleDirection.OUTBOUND
+        source_private = self._is_private_ip(source)
+        destination_private = self._is_private_ip(destination)
+        if source_private and not destination_private:
+            return RuleDirection.OUTBOUND
+        if destination_private and not source_private:
+            return RuleDirection.INBOUND
+        return RuleDirection.BOTH
+
+    @staticmethod
+    def _normalize_protocol(value: Any) -> str:
+        protocol = str(value or "Any").strip()
+        if not protocol or protocol == "*" or protocol.lower() == "any":
+            return "Any"
+        return protocol.upper()
+
+    @staticmethod
+    def _first_non_empty(row: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    def _list_value(self, value: Any, default: str = "*") -> list[str]:
+        if value in (None, ""):
+            return [default]
+        if isinstance(value, list):
+            items = [str(item) for item in value if item not in (None, "")]
+            return items or [default]
+        return [str(value)]
+
+    def _build_log_id(self, prefix: str, primary: Any, fallback: Any) -> str:
+        if primary not in (None, ""):
+            return self._trim(f"{prefix}:{primary}")
+        if fallback not in (None, ""):
+            return self._trim(f"{prefix}:{fallback}")
+        return prefix
+
+    @staticmethod
+    def _trim(value: str, max_length: int = 255) -> str:
+        return value[:max_length]
+
+    @staticmethod
+    def _is_private_ip(value: str) -> bool:
+        try:
+            return ip_address(value).is_private
+        except ValueError:
+            return False
 
     def generate(self, normalized: NormalizedRule) -> dict[str, Any]:
         return {

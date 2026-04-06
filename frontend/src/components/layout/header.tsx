@@ -5,7 +5,7 @@ export function Header() {
         <span className="text-xl" role="img" aria-label="flame">
           🔥
         </span>
-        <h1 className="text-lg font-semibold tracking-tight text-slate-900">
+        <h1 className="text-lg font-bold tracking-tight text-white">
           FlameGuard
         </h1>
       </div>

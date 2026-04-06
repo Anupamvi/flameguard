@@ -60,10 +60,10 @@ export function FileDropzone({ onFileSelected, isUploading }: FileDropzoneProps)
       onDrop={handleDrop}
       className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors ${
         isUploading
-          ? "border-slate-300 bg-slate-50"
+          ? "border-white/[0.1] bg-surface-700"
           : isDragOver
-            ? "border-blue-500 bg-blue-50"
-            : "border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50"
+            ? "border-flame-500 bg-flame-500/[0.05]"
+            : "border-white/[0.1] bg-surface-700/50 hover:border-flame-500/30 hover:bg-surface-700"
       }`}
     >
       <input
@@ -76,17 +76,17 @@ export function FileDropzone({ onFileSelected, isUploading }: FileDropzoneProps)
 
       {isUploading ? (
         <>
-          <Loader2 className="mb-4 h-10 w-10 animate-spin text-slate-400" />
-          <p className="text-sm font-medium text-slate-600">Uploading...</p>
-          <p className="mt-1 text-xs text-slate-400">Please wait while we process your file</p>
+          <Loader2 className="mb-4 h-12 w-12 animate-spin text-gray-500" />
+          <p className="text-base font-semibold text-gray-300">Uploading...</p>
+          <p className="mt-1 text-sm text-gray-500">Please wait while we process your file</p>
         </>
       ) : (
         <>
-          <Upload className="mb-4 h-10 w-10 text-slate-400" />
-          <p className="text-sm font-medium text-slate-600">
-            Drop your firewall config here, or click to browse
+          <Upload className="mb-4 h-12 w-12 text-gray-500" />
+          <p className="text-base font-semibold text-gray-300">
+            Drop your Azure Firewall, NSG, WAF, or supported Azure Firewall log export here
           </p>
-          <p className="mt-1 text-xs text-slate-400">Supports .json files</p>
+          <p className="mt-1 text-sm text-gray-500">Supports .json files</p>
         </>
       )}
     </div>

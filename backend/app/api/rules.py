@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -61,6 +62,10 @@ async def list_rules(
     db: AsyncSession = Depends(get_db),
 ) -> list[RuleOut]:
     """List all parsed rules in a ruleset."""
+    try:
+        uuid.UUID(ruleset_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Invalid ruleset_id format")
     # Verify ruleset exists
     rs = await db.get(RuleSet, ruleset_id)
     if not rs:
@@ -84,6 +89,10 @@ async def explain_rule(
     db: AsyncSession = Depends(get_db),
 ) -> RuleExplainResponse:
     """Get an AI-generated plain-English explanation of a rule."""
+    try:
+        uuid.UUID(rule_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Invalid rule_id format")
     from app.llm.client import ClaudeClient
     from app.llm.prompts.explain import SYSTEM_EXPLAIN, USER_EXPLAIN_TEMPLATE
     from app.llm.response_parser import parse_explain_response

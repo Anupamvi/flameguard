@@ -83,11 +83,17 @@ async def generate_rule(
     )
 
     # --- Call LLM ---
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+    if settings.llm_provider == "azure" and not settings.azure_api_key:
+        raise RuntimeError("AZURE_API_KEY is not configured")
+    if settings.llm_provider == "openai" and not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
 
     llm = ClaudeClient()
-    raw_response = await llm.analyze(system=SYSTEM_GENERATE, user=user_prompt)
+    raw_response = await llm.analyze(
+        system=SYSTEM_GENERATE,
+        user=user_prompt,
+        response_format={"type": "json_object"},
+    )
 
     # --- Parse response ---
     parsed = parse_generate_response(raw_response)
