@@ -5,12 +5,14 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.database import get_db
 from app.models.audit import AuditReport, AuditFinding
 from app.models.rule import RuleSet
+from app.privacy import sanitize_azure_text, sanitize_optional_azure_text
 from app.schemas.audit import DeleteAuditsRequest, DeleteAuditsResponse, AuditRequest, AuditResponse, FindingOut
+from app.security import admin_mutation_rate_limit, read_rate_limit, require_admin_token
 
 router = APIRouter()
 
@@ -79,35 +81,45 @@ async def _delete_audit_records(audit_ids: list[str], db: AsyncSession) -> Delet
     )
 
 
-def _report_to_response(report: AuditReport) -> AuditResponse:
+def _ruleset_summary_loader():
+    return selectinload(AuditReport.ruleset).load_only(
+        RuleSet.id,
+        RuleSet.filename,
+        RuleSet.vendor,
+        RuleSet.rule_count,
+    )
+
+
+def _report_to_response(report: AuditReport, *, include_findings: bool = True) -> AuditResponse:
     findings = []
-    for f in report.findings:
-        related = []
-        if f.related_rule_ids:
-            try:
-                related = json.loads(f.related_rule_ids)
-            except (json.JSONDecodeError, TypeError):
-                related = []
-        findings.append(FindingOut(
-            id=f.id,
-            severity=f.severity,
-            category=f.category,
-            title=f.title,
-            description=f.description,
-            recommendation=f.recommendation,
-            confidence=f.confidence,
-            affected_rule_ids=related,
-        ))
+    if include_findings:
+        for f in report.findings:
+            related = []
+            if f.related_rule_ids:
+                try:
+                    related = json.loads(f.related_rule_ids)
+                except (json.JSONDecodeError, TypeError):
+                    related = []
+            findings.append(FindingOut(
+                id=f.id,
+                severity=f.severity,
+                category=f.category,
+                title=sanitize_azure_text(f.title),
+                description=sanitize_azure_text(f.description),
+                recommendation=sanitize_optional_azure_text(f.recommendation),
+                confidence=f.confidence,
+                affected_rule_ids=related,
+            ))
 
     return AuditResponse(
         id=report.id,
         ruleset_id=report.ruleset_id,
-        filename=report.ruleset.filename,
+        filename=sanitize_azure_text(report.ruleset.filename),
         vendor=report.ruleset.vendor,
         rule_count=report.ruleset.rule_count,
         status=report.status,
-        summary=report.summary,
-        error_message=report.error_message,
+        summary=sanitize_optional_azure_text(report.summary),
+        error_message=sanitize_optional_azure_text(report.error_message),
         findings=findings,
         total_findings=report.total_findings,
         critical_count=report.critical_count,
@@ -128,7 +140,7 @@ async def create_audit(
     raise HTTPException(status_code=501, detail="LLM audit pipeline not implemented yet. Upload triggers a pending audit automatically.")
 
 
-@router.get("/audit/{audit_id}", response_model=AuditResponse)
+@router.get("/audit/{audit_id}", response_model=AuditResponse, dependencies=[Depends(read_rate_limit)])
 async def get_audit(
     audit_id: str,
     db: AsyncSession = Depends(get_db),
@@ -138,7 +150,7 @@ async def get_audit(
     result = await db.execute(
         select(AuditReport)
         .options(selectinload(AuditReport.findings))
-        .options(selectinload(AuditReport.ruleset))
+        .options(_ruleset_summary_loader())
         .where(AuditReport.id == audit_id)
     )
     report = result.scalar_one_or_none()
@@ -147,7 +159,7 @@ async def get_audit(
     return _report_to_response(report)
 
 
-@router.get("/audits", response_model=list[AuditResponse])
+@router.get("/audits", response_model=list[AuditResponse], dependencies=[Depends(read_rate_limit)])
 async def list_audits(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -157,17 +169,20 @@ async def list_audits(
     offset = (page - 1) * per_page
     result = await db.execute(
         select(AuditReport)
-        .options(selectinload(AuditReport.findings))
-        .options(selectinload(AuditReport.ruleset))
+        .options(_ruleset_summary_loader())
         .order_by(AuditReport.created_at.desc())
         .offset(offset)
         .limit(per_page)
     )
     reports = result.scalars().all()
-    return [_report_to_response(r) for r in reports]
+    return [_report_to_response(r, include_findings=False) for r in reports]
 
 
-@router.delete("/audit/{audit_id}", response_model=DeleteAuditsResponse)
+@router.delete(
+    "/audit/{audit_id}",
+    response_model=DeleteAuditsResponse,
+    dependencies=[Depends(admin_mutation_rate_limit), Depends(require_admin_token)],
+)
 async def delete_audit(
     audit_id: str,
     db: AsyncSession = Depends(get_db),
@@ -177,7 +192,11 @@ async def delete_audit(
     return await _delete_audit_records([audit_id], db)
 
 
-@router.delete("/audits", response_model=DeleteAuditsResponse)
+@router.delete(
+    "/audits",
+    response_model=DeleteAuditsResponse,
+    dependencies=[Depends(admin_mutation_rate_limit), Depends(require_admin_token)],
+)
 async def delete_audits(
     request: DeleteAuditsRequest,
     db: AsyncSession = Depends(get_db),

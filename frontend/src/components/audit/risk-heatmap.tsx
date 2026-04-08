@@ -174,6 +174,9 @@ export function RiskHeatmap({ rules, findings }: RiskHeatmapProps) {
 
   return (
     <div className="space-y-3">
+      <p className="sr-only">
+        Rule risk distribution. {LEGEND_ITEMS.filter((item) => counts.has(item.severity)).map(({ severity, label }) => `${counts.get(severity)} ${label.toLowerCase()} rules`).join(", ")}.
+      </p>
       {/* Title + Legend */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-gray-300">
@@ -210,7 +213,7 @@ export function RiskHeatmap({ rules, findings }: RiskHeatmapProps) {
       {/* Chart */}
       <div style={{ height: chartHeight }} className="w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
+          <BarChart accessibilityLayer={false} data={data} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
             <XAxis
               type="number"
               domain={[0, 10]}

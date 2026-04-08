@@ -25,6 +25,14 @@ class TestAutoDetectVendor:
         parser, vendor = auto_detect_vendor(firewall_log_export_normalized)
         assert vendor == VendorType.AZURE_FIREWALL
 
+    def test_detects_gsa_audit_log_export(self, gsa_audit_log_export_raw):
+        parser, vendor = auto_detect_vendor(gsa_audit_log_export_raw)
+        assert vendor == VendorType.AZURE_GSA
+
+    def test_detects_gsa_traffic_log_export(self, gsa_traffic_log_export_raw):
+        parser, vendor = auto_detect_vendor(gsa_traffic_log_export_raw)
+        assert vendor == VendorType.AZURE_GSA
+
     def test_does_not_auto_detect_ambiguous_empty_waf_export(self, waf_log_export_empty_raw):
         with pytest.raises(ValueError, match="Unrecognized"):
             auto_detect_vendor(waf_log_export_empty_raw)

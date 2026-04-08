@@ -16,6 +16,6 @@ def auto_detect_vendor(data: dict[str, Any]) -> tuple[BaseParser, VendorType]:
         raise ValueError(
             f"Unrecognized firewall config format. "
             f"Supported vendors: {supported}. "
-            f"Please upload a JSON export from Azure Firewall, Azure NSG, or Azure WAF."
+            f"Please upload a supported Azure Firewall, Azure NSG, Azure WAF, or Global Secure Access export."
         )
     return parser, parser.vendor

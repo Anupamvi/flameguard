@@ -37,7 +37,6 @@ class AzureFirewallParser(BaseParser):
         "AZFWNatRule",
         "AZFWNetworkRule",
         "AZFWThreatIntel",
-        "AzureDiagnostics",
     }
 
     def can_parse(self, data: dict[str, Any]) -> bool:
@@ -235,8 +234,11 @@ class AzureFirewallParser(BaseParser):
         return any(self._looks_like_firewall_log_row(row) for row in rows)
 
     def _looks_like_firewall_log_row(self, row: dict[str, Any]) -> bool:
-        row_type = str(row.get("Type") or row.get("Category") or "")
+        row_type = str(row.get("Type") or "")
+        category = str(row.get("Category") or "")
         if row_type in self._FIREWALL_LOG_TYPES:
+            return True
+        if category.startswith("AZFW") or category.startswith("AzureFirewall"):
             return True
         if row.get("QueryName") and row.get("SourceIp"):
             return True

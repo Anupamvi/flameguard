@@ -12,7 +12,9 @@ from app.models.audit import AuditReport
 from app.models.compliance import ComplianceCheck
 from app.models.rule import Rule, RuleSet
 from app.parsers.base import NormalizedRule, RuleAction, RuleDirection, VendorType
+from app.privacy import sanitize_azure_text, sanitize_optional_azure_text
 from app.schemas.compliance import ComplianceCheckOut, ComplianceSummary
+from app.security import read_rate_limit
 
 router = APIRouter()
 
@@ -80,9 +82,9 @@ def _build_summaries(checks: list[ComplianceCheck]) -> list[ComplianceSummary]:
                 id=c.id,
                 framework=c.framework,
                 control_id=c.control_id,
-                control_title=c.control_title,
+                control_title=sanitize_azure_text(c.control_title),
                 status=c.status,
-                evidence=c.evidence,
+                evidence=sanitize_optional_azure_text(c.evidence),
                 affected_rule_ids=affected,
             ))
 
@@ -98,7 +100,7 @@ def _build_summaries(checks: list[ComplianceCheck]) -> list[ComplianceSummary]:
     return summaries
 
 
-@router.get("/audit/{audit_id}/compliance", response_model=list[ComplianceSummary])
+@router.get("/audit/{audit_id}/compliance", response_model=list[ComplianceSummary], dependencies=[Depends(read_rate_limit)])
 async def get_compliance(
     audit_id: str,
     db: AsyncSession = Depends(get_db),
@@ -146,9 +148,9 @@ async def get_compliance(
             audit_id=audit_id,
             framework=cr.framework,
             control_id=cr.control_id,
-            control_title=cr.control_title,
+            control_title=sanitize_azure_text(cr.control_title),
             status=cr.status,
-            evidence=cr.evidence,
+            evidence=sanitize_optional_azure_text(cr.evidence),
             affected_rule_ids=json.dumps(cr.affected_rule_ids) if cr.affected_rule_ids else None,
         )
         db.add(check)

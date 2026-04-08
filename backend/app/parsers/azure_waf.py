@@ -36,8 +36,12 @@ class AzureWAFParser(BaseParser):
     }
     _AMBIGUOUS_SCHEMA_HINTS = {
         "clientIP_s",
+        "clientIp_s",
         "HostName_s",
+        "hostName_s",
+        "hostname_s",
         "listenerName_s",
+        "requestUri_s",
         "originalRequestUriWithArgs_s",
         "transactionId_g",
     }
@@ -142,22 +146,56 @@ class AzureWAFParser(BaseParser):
         return [r for r in data.get("resources", []) if r.get("type") in (self._APPGW_TYPE, self._FD_TYPE)]
 
     def _parse_log_rows(self, rows: list[dict[str, Any]]) -> list[NormalizedRule]:
-        return [self._parse_log_row(row) for row in rows if self._looks_like_waf_log_row(row)]
+        grouped: dict[tuple, NormalizedRule] = {}
+
+        for row in rows:
+            if not self._looks_like_waf_log_row(row):
+                continue
+
+            parsed = self._parse_log_row(row)
+            signature = self._build_log_signature(parsed)
+            representative = grouped.get(signature)
+            if representative is None:
+                parsed.tags["event_count"] = "1"
+                grouped[signature] = parsed
+                continue
+
+            event_count = int(representative.tags.get("event_count", "1")) + 1
+            representative.tags["event_count"] = str(event_count)
+            representative.source_addresses = self._merge_unique_values(
+                representative.source_addresses,
+                parsed.source_addresses,
+            )
+            representative.source_ports = self._merge_unique_values(
+                representative.source_ports,
+                parsed.source_ports,
+            )
+
+        condensed = sorted(
+            grouped.values(),
+            key=lambda rule: (-int(rule.tags.get("event_count", "1")), rule.name),
+        )
+        for rule in condensed:
+            event_count = int(rule.tags.get("event_count", "1"))
+            if event_count > 1:
+                rule.description = f"Observed in {event_count} matching WAF log events. {rule.description}"
+        return condensed
 
     def _parse_log_row(self, row: dict[str, Any]) -> NormalizedRule:
         category = self._first_non_empty(row, "Category", "category") or "ApplicationGatewayFirewallLog"
         request_uri = self._first_non_empty(row, "requestUri_s", "originalRequestUriWithArgs_s")
-        hostname = self._first_non_empty(row, "HostName_s", "host_s", "host", "originalHost_s")
+        hostname = self._first_non_empty(row, "HostName_s", "hostName_s", "hostname_s", "host_s", "host", "originalHost_s")
         listener_name = self._first_non_empty(row, "listenerName_s")
         client_ip = self._first_non_empty(row, "clientIP_s", "clientIp_s", "CallerIPAddress") or "*"
         transaction_id = self._first_non_empty(row, "transactionId_g", "CorrelationId")
         rule_name = self._first_non_empty(row, "ruleName_s", "ruleId_s")
-        time_generated = str(row.get("TimeGenerated") or "")
+        time_generated = self._first_non_empty(row, "TimeGenerated", "timeStamp_t") or ""
         action = self._coerce_log_action(
             self._first_non_empty(row, "action_s", "Action_s", "Action", "ResultType", "RecommendedAction_s")
         )
         destination_ports = self._coerce_destination_ports(row, request_uri)
         message = self._first_non_empty(row, "Message", "details_message_s", "ResultDescription")
+        source_port = self._first_non_empty(row, "clientPort_d", "clientPort_s")
 
         description_parts = [f"Observed {category}"]
         if request_uri:
@@ -196,7 +234,7 @@ class AzureWAFParser(BaseParser):
             direction=RuleDirection.INBOUND,
             protocol="HTTPS" if destination_ports == ["443"] else "HTTP/HTTPS",
             source_addresses=[client_ip],
-            source_ports=self._list_value(row.get("clientPort_d"), default="*"),
+            source_ports=self._list_value(source_port, default="*"),
             destination_addresses=[self._trim(target)],
             destination_ports=destination_ports,
             priority=self._coerce_priority(row.get("priority_d")),
@@ -228,7 +266,7 @@ class AzureWAFParser(BaseParser):
             return True
         client_ip = self._first_non_empty(row, "clientIP_s", "clientIp_s", "CallerIPAddress")
         request_uri = self._first_non_empty(row, "requestUri_s", "originalRequestUriWithArgs_s")
-        destination = self._first_non_empty(row, "HostName_s", "host_s", "listenerName_s")
+        destination = self._first_non_empty(row, "HostName_s", "hostName_s", "hostname_s", "host_s", "listenerName_s")
         return bool(client_ip and request_uri and destination)
 
     def _looks_like_waf_log_schema(self, section: Any) -> bool:
@@ -277,6 +315,29 @@ class AzureWAFParser(BaseParser):
                 for idx in range(len(columns))
             })
         return rows
+
+    @staticmethod
+    def _build_log_signature(rule: NormalizedRule) -> tuple:
+        return (
+            rule.name,
+            rule.action.value,
+            rule.protocol,
+            tuple(rule.destination_addresses),
+            tuple(rule.destination_ports),
+            rule.tags.get("rule_id", ""),
+            rule.tags.get("hostname", ""),
+            rule.tags.get("log_category", ""),
+        )
+
+    @staticmethod
+    def _merge_unique_values(existing: list[str], incoming: list[str], limit: int = 5) -> list[str]:
+        merged: list[str] = []
+        for value in [*existing, *incoming]:
+            if value not in merged:
+                merged.append(value)
+            if len(merged) >= limit:
+                break
+        return merged
 
     @staticmethod
     def _coerce_log_action(value: Any) -> RuleAction:

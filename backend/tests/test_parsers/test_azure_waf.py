@@ -47,6 +47,62 @@ class TestAzureWAFParser:
         assert len(rules) == 1
         assert rules[0].name == "SQLiBlock"
 
+    def test_parse_waf_log_rows_condenses_duplicates(self):
+        data = {
+            "tables": [
+                {
+                    "columns": [
+                        {"name": "Category"},
+                        {"name": "requestUri_s"},
+                        {"name": "ruleId_s"},
+                        {"name": "ruleName_s"},
+                        {"name": "action_s"},
+                        {"name": "details_message_s"},
+                        {"name": "hostname_s"},
+                        {"name": "timeStamp_t"},
+                        {"name": "transactionId_g"},
+                        {"name": "clientIp_s"},
+                        {"name": "clientPort_s"},
+                    ],
+                    "rows": [
+                        {
+                            "Category": "ApplicationGatewayFirewallLog",
+                            "requestUri_s": "https://shop.contoso.com/login",
+                            "ruleId_s": "942100",
+                            "ruleName_s": "SQLiBlock",
+                            "action_s": "Blocked",
+                            "details_message_s": "Detected SQL injection pattern",
+                            "hostname_s": "shop.contoso.com",
+                            "timeStamp_t": "2023-07-30T23:54:23.000Z",
+                            "transactionId_g": "11111111-2222-3333-4444-555555555555",
+                            "clientIp_s": "198.51.100.24",
+                            "clientPort_s": "58231",
+                        },
+                        {
+                            "Category": "ApplicationGatewayFirewallLog",
+                            "requestUri_s": "https://shop.contoso.com/login",
+                            "ruleId_s": "942100",
+                            "ruleName_s": "SQLiBlock",
+                            "action_s": "Blocked",
+                            "details_message_s": "Detected SQL injection pattern",
+                            "hostname_s": "shop.contoso.com",
+                            "timeStamp_t": "2023-07-30T23:55:23.000Z",
+                            "transactionId_g": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "clientIp_s": "198.51.100.25",
+                            "clientPort_s": "58232",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        rules = self.parser.parse(data)
+
+        assert len(rules) == 1
+        assert rules[0].tags.get("event_count") == "2"
+        assert set(rules[0].source_addresses) == {"198.51.100.24", "198.51.100.25"}
+        assert rules[0].description.startswith("Observed in 2 matching WAF log events.")
+
     def test_all_rules_are_inbound(self, waf_data):
         rules = self.parser.parse(waf_data)
         assert all(r.direction == RuleDirection.INBOUND for r in rules)

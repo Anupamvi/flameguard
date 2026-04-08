@@ -1,0 +1,82 @@
+name: Sync Container App AFD Allowlist
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: Azure resource group that hosts the Container Apps
+        required: false
+      container_apps:
+        description: Comma-separated Container App names to sync
+        required: false
+      service_tag_location:
+        description: Azure region used to resolve the AzureFrontDoor.Backend service tag
+        required: false
+        default: eastus
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sync-containerapp-ip-restrictions-to-afd
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RESOURCE_GROUP: ${{ inputs.resource_group || vars.FLAMEGUARD_RESOURCE_GROUP }}
+      CONTAINER_APPS: ${{ inputs.container_apps || vars.FLAMEGUARD_CONTAINER_APPS }}
+      SERVICE_TAG_LOCATION: ${{ inputs.service_tag_location || vars.FLAMEGUARD_SERVICE_TAG_LOCATION || 'eastus' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate workflow configuration
+        shell: pwsh
+        run: |
+          $missing = @()
+
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP)) {
+              $missing += 'FLAMEGUARD_RESOURCE_GROUP or workflow_dispatch input resource_group'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:CONTAINER_APPS)) {
+              $missing += 'FLAMEGUARD_CONTAINER_APPS or workflow_dispatch input container_apps'
+          }
+
+          if ($missing.Count -gt 0) {
+              throw "Missing workflow configuration: $($missing -join ', ')."
+          }
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sync Container Apps ingress allowlists
+        shell: pwsh
+        run: |
+          $containerApps = $env:CONTAINER_APPS -split '\s*,\s*' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          if ($containerApps.Count -eq 0) {
+              throw 'No container app names were provided.'
+          }
+
+          $results = ./scripts/sync-containerapp-ip-restrictions-to-afd.ps1 `
+              -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
+              -ResourceGroup $env:RESOURCE_GROUP `
+              -ContainerAppName $containerApps `
+              -Location $env:SERVICE_TAG_LOCATION
+
+          "## Synced Container Apps" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          foreach ($result in @($results)) {
+              "- $($result.containerApp): $($result.ruleCount) Azure Front Door IPv4 allowlist rules" >> $env:GITHUB_STEP_SUMMARY
+          }

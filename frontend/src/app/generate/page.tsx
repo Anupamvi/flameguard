@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { api, ApiError } from "@/lib/api-client";
-import type { RuleGenResponse } from "@/lib/types";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { api, getApiErrorMessage } from "@/lib/api-client";
+import type { FindingOut, RuleGenResponse } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -48,7 +50,43 @@ const EXAMPLE_PROMPTS = [
   },
 ] as const;
 
+const VENDOR_LABELS: Record<string, string> = {
+  azure_nsg: "Azure NSG",
+  azure_firewall: "Azure Firewall",
+  azure_waf: "Azure WAF",
+};
+
+type FindingGenerationSource = {
+  auditId: string;
+  filename: string;
+  vendor: string;
+  finding: FindingOut;
+};
+
+function toVendorLabel(vendor: string) {
+  return VENDOR_LABELS[vendor] ?? vendor;
+}
+
+function buildFindingDraftDescription(finding: FindingOut) {
+  return [
+    `Generate a safer rule to remediate this ${finding.severity} ${finding.category} finding.`,
+    `Issue: ${finding.title}.`,
+    finding.description,
+    finding.recommendation ? `Recommended action: ${finding.recommendation}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function errorMessage(err: unknown) {
+  return getApiErrorMessage(err);
+}
+
 export default function GeneratePage() {
+  const searchParams = useSearchParams();
+  const auditId = searchParams.get("auditId");
+  const findingId = searchParams.get("findingId");
+  const autoGenerateKeyRef = useRef<string | null>(null);
   const [description, setDescription] = useState("");
   const [vendor, setVendor] = useState<string>(VENDORS[0]);
   const [severity, setSeverity] = useState<"critical" | "high" | "medium" | "low" | "info">("medium");
@@ -57,6 +95,66 @@ export default function GeneratePage() {
   const [result, setResult] = useState<RuleGenResponse | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [sourceFinding, setSourceFinding] = useState<FindingGenerationSource | null>(null);
+
+  useEffect(() => {
+    const requestKey = auditId && findingId ? `${auditId}:${findingId}` : null;
+    if (!requestKey || autoGenerateKeyRef.current === requestKey) {
+      return;
+    }
+
+    autoGenerateKeyRef.current = requestKey;
+    let isCancelled = false;
+
+    async function generateFromFinding() {
+      setIsGenerating(true);
+      setError("");
+      setResult(null);
+
+      try {
+        const audit = await api.getAudit(auditId!);
+        const finding = audit.findings.find((item) => item.id === findingId);
+        if (!finding) {
+          throw new Error("The selected audit finding could not be loaded.");
+        }
+        if (isCancelled) {
+          return;
+        }
+
+        setSourceFinding({
+          auditId: auditId!,
+          filename: audit.filename,
+          vendor: toVendorLabel(audit.vendor),
+          finding,
+        });
+        setDescription(buildFindingDraftDescription(finding));
+        setVendor(toVendorLabel(audit.vendor));
+        setSeverity(finding.severity);
+        setCategory(finding.category);
+
+        const response = await api.generateRuleFromFinding(auditId!, findingId!);
+        if (isCancelled) {
+          return;
+        }
+        setResult(response);
+      } catch (err) {
+        if (isCancelled) {
+          return;
+        }
+        setError(errorMessage(err));
+      } finally {
+        if (!isCancelled) {
+          setIsGenerating(false);
+        }
+      }
+    }
+
+    void generateFromFinding();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [auditId, findingId]);
 
   async function handleGenerate() {
     if (!description.trim()) return;
@@ -73,14 +171,7 @@ export default function GeneratePage() {
       });
       setResult(response);
     } catch (err) {
-      if (err instanceof ApiError) {
-        const body = err.body as { detail?: string } | undefined;
-        setError(body?.detail || err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("An unexpected error occurred");
-      }
+      setError(errorMessage(err));
     } finally {
       setIsGenerating(false);
     }
@@ -100,9 +191,54 @@ export default function GeneratePage() {
           Rule Generator
         </h2>
         <p className="fg-page-subtitle">
-          Generate firewall rules using natural language descriptions
+          {sourceFinding
+            ? "Generate a remediation rule directly from the selected audit finding"
+            : "Generate vendor policy rules using natural language descriptions"}
         </p>
       </div>
+
+      {(auditId && findingId) && (
+        <div className="rounded-xl border border-white/[0.08] bg-surface-800/80 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-flame-500/10 text-flame-300">Audit finding</Badge>
+                {sourceFinding && (
+                  <Badge className="bg-white/[0.06] text-gray-300">{sourceFinding.vendor}</Badge>
+                )}
+                {sourceFinding && (
+                  <Badge className="bg-white/[0.06] text-gray-300">{sourceFinding.finding.severity}</Badge>
+                )}
+              </div>
+              <h3 className="mt-3 text-lg font-semibold text-gray-100">
+                {sourceFinding?.finding.title || "Generating from the selected finding"}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-gray-300">
+                {sourceFinding?.finding.description || "FlameGuard is loading the finding context and drafting a safer rule automatically."}
+              </p>
+              {sourceFinding?.finding.recommendation && (
+                <p className="mt-3 text-sm text-gray-400">
+                  Recommended action: {sourceFinding.finding.recommendation}
+                </p>
+              )}
+              {isGenerating && !result && (
+                <p className="mt-3 text-sm font-medium text-flame-300">
+                  Generating a safer rule from this finding now.
+                </p>
+              )}
+            </div>
+
+            {sourceFinding && (
+              <Link
+                href={`/audit/${sourceFinding.auditId}?tab=findings&finding=${sourceFinding.finding.id}`}
+                className="inline-flex items-center rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08]"
+              >
+                Back to {sourceFinding.filename}
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* What this tool does */}
       <div className="rounded-xl border border-white/[0.06] bg-gradient-to-br from-surface-700 to-surface-800 p-5">
@@ -162,7 +298,9 @@ export default function GeneratePage() {
         <CardHeader>
           <CardTitle>Describe Your Rule</CardTitle>
           <CardDescription>
-            Enter a natural language description of the firewall rule you need
+            {sourceFinding
+              ? "Review the finding-backed generation brief below, then refine and regenerate if needed"
+              : "Enter a natural language description of the security rule or policy you need"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -262,7 +400,7 @@ export default function GeneratePage() {
                 Generating...
               </>
             ) : (
-              "Generate Rule"
+              sourceFinding ? "Regenerate Rule" : "Generate Rule"
             )}
           </Button>
         </CardContent>
@@ -285,7 +423,7 @@ export default function GeneratePage() {
               <div className="flex items-center justify-between">
                 <CardTitle>Generated Rule</CardTitle>
                 <div className="flex items-center gap-2">
-                  <Badge className="bg-sev-pass/10 text-sev-pass">
+                  <Badge className={result.warnings.length > 0 ? "bg-sev-medium/10 text-sev-medium" : "bg-sev-pass/10 text-sev-pass"}>
                     Confidence: {Math.round(result.confidence * 100)}%
                   </Badge>
                   <Button variant="outline" size="sm" onClick={handleCopy}>
@@ -318,11 +456,40 @@ export default function GeneratePage() {
             </CardContent>
           </Card>
 
+          {result.warnings.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Warnings</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {result.warnings.map((warning) => (
+                    <div key={warning} className="flex items-start gap-2 rounded-lg border border-sev-medium/25 bg-sev-medium/[0.08] p-3">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-sev-medium" />
+                      <p className="text-sm text-amber-100/85">{warning}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-sev-pass" />
-            <span className="text-sm font-medium text-sev-pass">
-              Rule generated successfully
-            </span>
+            {result.warnings.length > 0 ? (
+              <>
+                <AlertTriangle className="h-5 w-5 text-sev-medium" />
+                <span className="text-sm font-medium text-sev-medium">
+                  Rule generated with cautions
+                </span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-5 w-5 text-sev-pass" />
+                <span className="text-sm font-medium text-sev-pass">
+                  Rule generated successfully
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -505,7 +505,7 @@ async def seed_demo(db: AsyncSession) -> dict:
         ruleset_id=DEMO_RULESET_ID,
         status="completed",
         summary=(
-            "Audit of nsg-prod-eastus identified 20 security findings across "
+         f"Audit of nsg-prod-eastus identified {len(all_findings)} security findings across "
             f"{len(_RULES)} rules. "
             f"{sev_counts['critical']} critical and {sev_counts['high']} high-severity issues "
             "require immediate attention. The most urgent finding is an unrestricted "

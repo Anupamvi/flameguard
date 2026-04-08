@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from app.config import settings
@@ -50,6 +51,111 @@ _VENDOR_CONTAINERS: dict[VendorType, callable] = {
         },
     },
 }
+
+_SOURCE_RANGE_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b")
+_SCOPED_SOURCE_HINTS = (
+    "except from",
+    "except for",
+    "only from",
+    "allow only from",
+    "restricted to",
+    "limit to",
+)
+
+
+def _extract_intent_source_ranges(intent: str) -> list[str]:
+    seen: list[str] = []
+    for match in _SOURCE_RANGE_RE.findall(intent):
+        if match not in seen:
+            seen.append(match)
+    return seen
+
+
+def _nsg_properties(config: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    properties = config.get("properties")
+    if isinstance(properties, dict):
+        return properties
+    return config
+
+
+def _read_nsg_sources(props: dict[str, Any]) -> list[str]:
+    plural = props.get("sourceAddressPrefixes")
+    if isinstance(plural, list) and plural:
+        return [str(value) for value in plural]
+    singular = props.get("sourceAddressPrefix")
+    if isinstance(singular, str) and singular:
+        return [singular]
+    return ["*"]
+
+
+def _write_nsg_sources(props: dict[str, Any], sources: list[str]) -> None:
+    if len(sources) <= 1:
+        props["sourceAddressPrefix"] = sources[0] if sources else "*"
+        props["sourceAddressPrefixes"] = []
+        return
+
+    props["sourceAddressPrefix"] = ""
+    props["sourceAddressPrefixes"] = sources
+
+
+def _rewrite_name_for_allow(name: Any) -> Any:
+    if not isinstance(name, str) or not name:
+        return name
+
+    normalized = name
+    replacements = (
+        ("deny-", "allow-"),
+        ("block-", "allow-"),
+        ("deny_", "allow_"),
+        ("block_", "allow_"),
+    )
+    lower_name = normalized.lower()
+    for prefix, replacement in replacements:
+        if lower_name.startswith(prefix):
+            return replacement + normalized[len(prefix):]
+    return normalized
+
+
+def _apply_nsg_source_scope_guardrail(intent: str, config: dict[str, Any], warnings: list[str]) -> None:
+    intent_lower = intent.lower()
+    if not any(hint in intent_lower for hint in _SCOPED_SOURCE_HINTS):
+        return
+
+    sources = _extract_intent_source_ranges(intent)
+    if not sources:
+        return
+
+    props = _nsg_properties(config)
+    if props is None:
+        return
+
+    direction = str(props.get("direction", "Inbound")).lower()
+    if direction != "inbound":
+        return
+
+    current_sources = _read_nsg_sources(props)
+    current_access = str(props.get("access", "Allow")).lower()
+    needs_source_fix = current_sources == ["*"] or any(source not in current_sources for source in sources)
+    needs_access_fix = current_access == "deny"
+
+    if not needs_source_fix and not needs_access_fix:
+        return
+
+    _write_nsg_sources(props, sources)
+    if needs_access_fix:
+        props["access"] = "Allow"
+        config["name"] = _rewrite_name_for_allow(config.get("name"))
+
+    warnings.append(
+        "Adjusted the NSG rule to allow only the requested source range because an inbound deny rule with a wildcard source would block the exception traffic too. Azure NSGs rely on lower-priority or default deny rules to block all other sources."
+    )
+
+
+def _apply_generation_guardrails(vendor_type: VendorType, intent: str, config: dict[str, Any], warnings: list[str]) -> None:
+    if vendor_type == VendorType.AZURE_NSG:
+        _apply_nsg_source_scope_guardrail(intent, config, warnings)
 
 
 async def generate_rule(
@@ -99,7 +205,9 @@ async def generate_rule(
     parsed = parse_generate_response(raw_response)
     config = parsed["config"]
     explanation = parsed["explanation"]
-    warnings = parsed["warnings"]
+    warnings = list(parsed["warnings"])
+
+    _apply_generation_guardrails(vendor_type, intent, config, warnings)
 
     # --- Round-trip validation ---
     is_valid = False

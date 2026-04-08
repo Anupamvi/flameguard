@@ -1,6 +1,8 @@
 from app.privacy import (
     REDACTED_RESOURCE_GROUP,
     REDACTED_SUBSCRIPTION,
+    REDACTED_SUBSCRIPTION_NAME,
+    REDACTED_USER,
     sanitize_azure_data,
     sanitize_azure_text,
 )
@@ -34,3 +36,30 @@ def test_sanitize_azure_data_redacts_nested_fields() -> None:
     assert sanitized["properties"]["resourceGroupName"] == REDACTED_RESOURCE_GROUP
     assert REDACTED_SUBSCRIPTION in sanitized["properties"]["id"]
     assert REDACTED_RESOURCE_GROUP in sanitized["properties"]["id"]
+
+
+def test_sanitize_azure_text_redacts_labeled_subscription_names_and_users() -> None:
+    raw = "subscriptionName: Finance Prod; owner: alice@example.com"
+
+    sanitized = sanitize_azure_text(raw)
+
+    assert "Finance Prod" not in sanitized
+    assert "alice@example.com" not in sanitized
+    assert REDACTED_SUBSCRIPTION_NAME in sanitized
+    assert REDACTED_USER in sanitized
+
+
+def test_sanitize_azure_data_redacts_subscription_name_and_user_fields() -> None:
+    payload = {
+        "subscriptionName": "Finance Prod",
+        "owner": "alice@example.com",
+        "metadata": {
+            "userPrincipalName": "alice@example.com",
+        },
+    }
+
+    sanitized = sanitize_azure_data(payload)
+
+    assert sanitized["subscriptionName"] == REDACTED_SUBSCRIPTION_NAME
+    assert sanitized["owner"] == REDACTED_USER
+    assert sanitized["metadata"]["userPrincipalName"] == REDACTED_USER

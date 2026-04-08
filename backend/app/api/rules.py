@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.rule import Rule, RuleSet
+from app.privacy import sanitize_azure_data, sanitize_azure_text, sanitize_optional_azure_text
 from app.schemas.rule import RuleExplainResponse, RuleOut
+from app.security import generation_rate_limit, read_rate_limit
 
 router = APIRouter()
 
@@ -25,7 +27,14 @@ def _rule_to_out(rule: Rule) -> RuleOut:
         if not val:
             return {}
         try:
-            return json.loads(val)
+            parsed = json.loads(val)
+            if not isinstance(parsed, dict):
+                return {}
+            sanitized = sanitize_azure_data(parsed)
+            return {
+                str(key): value if isinstance(value, str) else json.dumps(value)
+                for key, value in sanitized.items()
+            }
         except (json.JSONDecodeError, TypeError):
             return {}
 
@@ -36,8 +45,8 @@ def _rule_to_out(rule: Rule) -> RuleOut:
 
     return RuleOut(
         id=rule.id,
-        original_id=rule.original_id or "",
-        name=rule.name,
+        original_id=sanitize_optional_azure_text(rule.original_id) or "",
+        name=sanitize_azure_text(rule.name),
         vendor=vendor,
         action=rule.action,
         direction=rule.direction,
@@ -47,16 +56,16 @@ def _rule_to_out(rule: Rule) -> RuleOut:
         destination_addresses=_parse_json_list(rule.dest_addresses),
         destination_ports=_parse_json_list(rule.dest_ports),
         priority=rule.priority,
-        collection_name=rule.collection_name,
+        collection_name=sanitize_optional_azure_text(rule.collection_name),
         collection_priority=rule.collection_priority,
-        description=rule.description or "",
+        description=sanitize_optional_azure_text(rule.description) or "",
         enabled=rule.enabled,
         risk_score=rule.risk_score,
         tags=_parse_json_dict(rule.tags),
     )
 
 
-@router.get("/rulesets/{ruleset_id}/rules", response_model=list[RuleOut])
+@router.get("/rulesets/{ruleset_id}/rules", response_model=list[RuleOut], dependencies=[Depends(read_rate_limit)])
 async def list_rules(
     ruleset_id: str,
     db: AsyncSession = Depends(get_db),
@@ -83,7 +92,7 @@ async def list_rules(
     return [_rule_to_out(r) for r in rules]
 
 
-@router.get("/rules/{rule_id}/explain", response_model=RuleExplainResponse)
+@router.get("/rules/{rule_id}/explain", response_model=RuleExplainResponse, dependencies=[Depends(generation_rate_limit)])
 async def explain_rule(
     rule_id: str,
     db: AsyncSession = Depends(get_db),

@@ -75,7 +75,16 @@ export default function ChatPage() {
       });
 
       if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
+        let detail = `API error: ${res.status}`;
+        try {
+          const body = await res.json() as { detail?: unknown };
+          if (typeof body.detail === "string" && body.detail.trim()) {
+            detail = body.detail;
+          }
+        } catch {
+          // Ignore non-JSON error payloads.
+        }
+        throw new Error(detail);
       }
 
       const reader = res.body?.getReader();
@@ -169,7 +178,7 @@ export default function ChatPage() {
           Policy Chat
         </h2>
         <p className="fg-page-subtitle max-w-none">
-          Ask questions about firewall policies, audit findings, or general network security
+          Ask questions about security policies, audit findings, or general network security
         </p>
       </div>
 
@@ -224,7 +233,7 @@ export default function ChatPage() {
                 <Bot className="h-10 w-10 text-gray-600" />
                 <p className="text-base text-gray-500">
                   {isGeneralMode
-                    ? "Ask anything about firewall policies and network security."
+                    ? "Ask anything about security policies, compliance, and network security."
                     : "Ask a question about this audit to get started."}
                 </p>
                 {isGeneralMode && (
@@ -295,7 +304,7 @@ export default function ChatPage() {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   isGeneralMode
-                    ? "Ask about firewall best practices, compliance, segmentation..."
+                    ? "Ask about policy best practices, compliance, segmentation..."
                     : "Ask about this audit..."
                 }
                 disabled={isStreaming}

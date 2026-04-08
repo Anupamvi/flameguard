@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +28,8 @@ from app.models.audit import AuditFinding, AuditReport
 from app.models.compliance import ComplianceCheck
 from app.models.rule import Rule, RuleSet
 from app.parsers.base import NormalizedRule, RuleAction, RuleDirection, VendorType
+from app.config import settings
+from app.privacy import sanitize_azure_text, sanitize_optional_azure_text
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +71,115 @@ def _db_rule_to_normalized(rule: Rule) -> NormalizedRule:
         enabled=rule.enabled,
         tags=_json_dict(rule.tags),
     )
+
+
+def _is_observed_waf_log_rule(rule: NormalizedRule) -> bool:
+    return rule.vendor == VendorType.AZURE_WAF and rule.tags.get("rule_type") == "ObservedWAFLog"
+
+
+def _merge_unique(existing: list[str], incoming: list[str], limit: int = 5) -> list[str]:
+    merged: list[str] = []
+    for value in [*existing, *incoming]:
+        if value not in merged:
+            merged.append(value)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _waf_log_signature(rule: NormalizedRule) -> tuple:
+    return (
+        rule.name,
+        rule.action.value,
+        rule.protocol,
+        tuple(rule.destination_addresses),
+        tuple(rule.destination_ports),
+        rule.tags.get("rule_id", ""),
+        rule.tags.get("hostname", ""),
+        rule.tags.get("log_category", ""),
+    )
+
+
+def _prepare_rules_for_analysis(
+    rules: list[NormalizedRule],
+) -> tuple[list[NormalizedRule], str | None]:
+    if not rules or not all(_is_observed_waf_log_rule(rule) for rule in rules):
+        return rules, None
+
+    grouped: dict[tuple, NormalizedRule] = {}
+    for rule in rules:
+        signature = _waf_log_signature(rule)
+        representative = grouped.get(signature)
+        if representative is None:
+            representative = deepcopy(rule)
+            representative.tags = dict(rule.tags)
+            representative.tags["event_count"] = "1"
+            grouped[signature] = representative
+            continue
+
+        event_count = int(representative.tags.get("event_count", "1")) + 1
+        representative.tags["event_count"] = str(event_count)
+        representative.source_addresses = _merge_unique(representative.source_addresses, rule.source_addresses)
+        representative.source_ports = _merge_unique(representative.source_ports, rule.source_ports)
+
+    reduced = sorted(
+        grouped.values(),
+        key=lambda rule: (-int(rule.tags.get("event_count", "1")), rule.name),
+    )
+    unique_pattern_count = len(reduced)
+
+    if len(reduced) > settings.max_log_rules_for_analysis:
+        reduced = reduced[: settings.max_log_rules_for_analysis]
+
+    for representative in reduced:
+        event_count = int(representative.tags.get("event_count", "1"))
+        if event_count > 1:
+            representative.description = (
+                f"Observed in {event_count} matching WAF log events. {representative.description}"
+            ).strip()
+
+    summary = f"Condensed {len(rules)} WAF log rows into {unique_pattern_count} representative event patterns"
+    if unique_pattern_count > len(reduced):
+        summary += f" and analyzed the top {len(reduced)} patterns"
+    return reduced, f"{summary}."
+
+
+_SUMMARY_FINDINGS_PATTERN = re.compile(
+    r"^(?:The\s+)?audit(?:\s+of\s+[^.]+)?\s+identified\s+\d+\s+security\s+findings\s+across\s+\d+\s+rules\.?\s*",
+    flags=re.IGNORECASE,
+)
+_SUMMARY_URGENT_PATTERN = re.compile(
+    r"^\d+\s+critical\s+and\s+\d+\s+high-severity\s+issues\s+require\s+immediate\s+attention\.?\s*",
+    flags=re.IGNORECASE,
+)
+
+
+def _normalize_executive_summary(
+    summary: str,
+    *,
+    total_findings: int,
+    rule_count: int,
+    critical_count: int,
+    high_count: int,
+    analysis_note: str | None = None,
+) -> str:
+    normalized_summary = " ".join(summary.split())
+    normalized_summary = _SUMMARY_FINDINGS_PATTERN.sub("", normalized_summary)
+    normalized_summary = _SUMMARY_URGENT_PATTERN.sub("", normalized_summary)
+
+    summary_parts = []
+    if analysis_note:
+        summary_parts.append(analysis_note.strip())
+    summary_parts.append(
+        f"Audit identified {total_findings} security findings across {rule_count} rules."
+    )
+    summary_parts.append(
+        f"{critical_count} critical and {high_count} high-severity issues require immediate attention."
+    )
+    if normalized_summary:
+        summary_parts.append(normalized_summary)
+
+    return " ".join(part for part in summary_parts if part).strip()
 
 
 def _deduplicate_findings(findings: list[dict]) -> list[dict]:
@@ -152,7 +266,39 @@ class AuditPipeline:
     def __init__(self, db: AsyncSession, llm: ClaudeClient) -> None:
         self.db = db
         self.llm = llm
-        self.chunker = RuleSetChunker()
+        self.chunker = RuleSetChunker(max_rules_per_chunk=settings.max_rules_per_chunk)
+
+    async def _analyze_json(
+        self,
+        *,
+        system: str,
+        user: str,
+        parser: Callable[[str], dict | list],
+        max_tokens: int = 4096,
+        attempts: int = 2,
+    ):
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            raw_response = await self.llm.analyze(
+                system=system,
+                user=user,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            try:
+                return parser(raw_response)
+            except ValueError as exc:
+                last_error = exc
+                logger.warning(
+                    "Audit %s JSON parse failure on attempt %d/%d: %s",
+                    getattr(self, "_current_audit_id", "unknown"),
+                    attempt,
+                    attempts,
+                    exc,
+                )
+
+        assert last_error is not None
+        raise last_error
 
     async def _update_status(self, audit_id: str, status: str, **kwargs) -> None:
         """Update audit report status and optional extra fields."""
@@ -166,6 +312,7 @@ class AuditPipeline:
     async def run(self, audit_id: str, ruleset_id: str) -> None:
         """Full audit pipeline: load rules -> chunk -> analyze -> risk score -> store findings."""
         try:
+            self._current_audit_id = audit_id
             # 1. Update status to "auditing"
             await self._update_status(audit_id, "auditing")
 
@@ -188,12 +335,13 @@ class AuditPipeline:
             # Convert to NormalizedRule
             normalized = [_db_rule_to_normalized(r) for r in db_rules]
             vendor = ruleset.vendor
+            analysis_rules, analysis_note = _prepare_rules_for_analysis(normalized)
 
             # Build a name -> rule_id mapping for linking findings back to DB rules
             name_to_rule_id: dict[str, str] = {r.name: r.id for r in db_rules}
 
             # 3. Chunk rules
-            chunks = self.chunker.chunk(normalized)
+            chunks = self.chunker.chunk(analysis_rules)
 
             # 4. Analyze each chunk
             all_findings: list[dict] = []
@@ -216,17 +364,18 @@ class AuditPipeline:
                     overlap_note=overlap_note,
                 )
 
-                raw_response = await self.llm.analyze(
-                    system=SYSTEM_AUDIT, user=user_prompt
+                chunk_findings = await self._analyze_json(
+                    system=SYSTEM_AUDIT,
+                    user=user_prompt,
+                    parser=parse_audit_response,
                 )
-                chunk_findings = parse_audit_response(raw_response)
                 all_findings.extend(chunk_findings)
 
             # 5. Merge & deduplicate
             all_findings = _deduplicate_findings(all_findings)
 
             # 5b. Run deterministic checks and cross-reference with LLM findings
-            det_findings = run_deterministic_checks(normalized)
+            det_findings = run_deterministic_checks(analysis_rules)
             all_findings = _cross_reference_findings(all_findings, det_findings, name_to_rule_id)
 
             # 6. Risk scoring pass (second Claude call)
@@ -235,13 +384,14 @@ class AuditPipeline:
             findings_json = json.dumps(all_findings, indent=2)
             risk_prompt = USER_RISK_SCORE_TEMPLATE.format(
                 vendor=vendor,
-                rule_count=len(normalized),
+                rule_count=len(analysis_rules),
                 findings_json=findings_json,
             )
-            risk_raw = await self.llm.analyze(
-                system=SYSTEM_RISK_SCORE, user=risk_prompt
+            risk_data = await self._analyze_json(
+                system=SYSTEM_RISK_SCORE,
+                user=risk_prompt,
+                parser=parse_risk_response,
             )
-            risk_data = parse_risk_response(risk_raw)
             executive_summary = risk_data["executive_summary"]
 
             # 7. Store findings in DB
@@ -268,13 +418,22 @@ class AuditPipeline:
                     related_rule_ids=json.dumps(affected_rule_ids) if affected_rule_ids else None,
                     severity=sev,
                     category=f["category"],
-                    title=f["title"],
-                    description=f["description"],
-                    recommendation=f.get("recommendation"),
+                    title=sanitize_azure_text(f["title"]),
+                    description=sanitize_azure_text(f["description"]),
+                    recommendation=sanitize_optional_azure_text(f.get("recommendation")),
                     confidence=f.get("confidence"),
                     source=f.get("source", "llm"),
                 )
                 self.db.add(finding)
+
+            executive_summary = _normalize_executive_summary(
+                executive_summary,
+                total_findings=len(all_findings),
+                rule_count=len(normalized),
+                critical_count=severity_counts["critical"],
+                high_count=severity_counts["high"],
+                analysis_note=analysis_note,
+            )
 
             # 8. Run compliance checks
             compliance_engine = get_compliance_engine()
@@ -284,9 +443,9 @@ class AuditPipeline:
                     audit_id=audit_id,
                     framework=cr.framework,
                     control_id=cr.control_id,
-                    control_title=cr.control_title,
+                    control_title=sanitize_azure_text(cr.control_title),
                     status=cr.status,
-                    evidence=cr.evidence,
+                    evidence=sanitize_optional_azure_text(cr.evidence),
                     affected_rule_ids=json.dumps(cr.affected_rule_ids) if cr.affected_rule_ids else None,
                 )
                 self.db.add(check)
@@ -302,7 +461,7 @@ class AuditPipeline:
             await self._update_status(
                 audit_id,
                 "completed",
-                summary=executive_summary,
+                summary=sanitize_azure_text(executive_summary),
                 total_findings=len(all_findings),
                 critical_count=severity_counts["critical"],
                 high_count=severity_counts["high"],
@@ -323,7 +482,7 @@ class AuditPipeline:
             logger.exception("Audit pipeline failed for audit_id=%s", audit_id)
             try:
                 await self._update_status(
-                    audit_id, "failed", error_message=str(e)
+                    audit_id, "failed", error_message=sanitize_azure_text(str(e))
                 )
             except Exception:
                 logger.exception("Failed to update audit status to 'failed'")

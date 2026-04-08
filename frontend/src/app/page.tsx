@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useAudits } from "@/hooks/use-audit";
 import { api } from "@/lib/api-client";
+import { calculateComplianceStats, calculateFrameworkPassingRate, calculatePostureScore } from "@/lib/audit-metrics";
+import { formatRelativeTime, parseTimestamp } from "@/lib/time";
 import type { AuditResponse, ComplianceSummary, FindingOut } from "@/lib/types";
 import { PieChart, Pie, Cell } from "recharts";
 import {
@@ -40,40 +42,18 @@ const SEVERITY_RANK: Record<FindingOut["severity"], number> = {
   low: 1,
   info: 0,
 };
+const FRAMEWORK_LABELS: Record<string, string> = {
+  cis_azure_v2: "CIS Azure Benchmark v2.0",
+  pci_dss_v4: "PCI DSS v4.0",
+  nist_800_53: "NIST 800-53",
+  soc2: "SOC 2",
+};
 
 function sortAuditsByCreatedAt(audits: AuditResponse[]) {
   return [...audits].sort(
     (left, right) =>
-      new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+      (parseTimestamp(right.created_at)?.getTime() ?? 0) - (parseTimestamp(left.created_at)?.getTime() ?? 0),
   );
-}
-
-function relativeTime(timestamp: string) {
-  const now = Date.now();
-  const value = new Date(timestamp).getTime();
-  const diffMinutes = Math.round((value - now) / 60000);
-  const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-  if (Math.abs(diffMinutes) < 60) {
-    return formatter.format(diffMinutes, "minute");
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) {
-    return formatter.format(diffHours, "hour");
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-  if (Math.abs(diffDays) < 30) {
-    return formatter.format(diffDays, "day");
-  }
-
-  const diffMonths = Math.round(diffDays / 30);
-  if (Math.abs(diffMonths) < 12) {
-    return formatter.format(diffMonths, "month");
-  }
-
-  return formatter.format(Math.round(diffMonths / 12), "year");
 }
 
 function truncateText(value: string | null | undefined, maxLength: number) {
@@ -82,9 +62,8 @@ function truncateText(value: string | null | undefined, maxLength: number) {
   return `${value.slice(0, maxLength).trimEnd()}...`;
 }
 
-function percent(part: number, whole: number) {
-  if (whole <= 0) return 0;
-  return Math.round((part / whole) * 100);
+function frameworkLabel(value: string) {
+  return FRAMEWORK_LABELS[value] ?? value;
 }
 
 function focusAuditStatusStyle(status: AuditResponse["status"]) {
@@ -155,7 +134,7 @@ function PostureRing({ score }: { score: number }) {
 
   return (
     <div className="relative mx-auto h-[140px] w-[140px]">
-      <PieChart width={140} height={140}>
+      <PieChart accessibilityLayer={false} width={140} height={140}>
         <Pie
           data={data}
           cx={70}
@@ -178,6 +157,7 @@ function PostureRing({ score }: { score: number }) {
         </span>
         <span className="text-sm text-gray-500">Posture</span>
       </div>
+      <p className="sr-only">Current posture score is {score}%.</p>
     </div>
   );
 }
@@ -196,7 +176,7 @@ function SeverityDonut({ data }: { data: { name: string; value: number; color: s
   return (
     <div className="flex items-center gap-5">
       <div className="relative h-[130px] w-[130px] shrink-0">
-        <PieChart width={130} height={130}>
+        <PieChart accessibilityLayer={false} width={130} height={130}>
           <Pie
             data={data}
             cx={65}
@@ -236,6 +216,9 @@ function SeverityDonut({ data }: { data: { name: string; value: number; color: s
             </div>
           ))}
       </div>
+      <p className="sr-only">
+        Severity distribution: {data.filter((item) => item.value > 0).map((item) => `${item.value} ${item.name.toLowerCase()}`).join(", ")}.
+      </p>
     </div>
   );
 }
@@ -319,15 +302,15 @@ function AuditQueueRow({ audit, focused }: { audit: AuditResponse; focused: bool
           )}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-base font-medium text-gray-200">{audit.filename}</p>
-          <p className="text-sm text-gray-500">{audit.vendor} &middot; {relativeTime(audit.created_at)}</p>
+          <p title={audit.filename} aria-label={audit.filename} className="truncate text-base font-medium text-gray-200">{audit.filename}</p>
+          <p className="text-sm text-gray-500">{audit.vendor} &middot; {formatRelativeTime(audit.created_at)}</p>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-4">
         <div className="flex items-center gap-2 text-xs tabular-nums">
           {audit.critical_count > 0 && <span className="rounded bg-sev-critical/10 px-1.5 py-0.5 font-medium text-sev-critical">{audit.critical_count}C</span>}
-          {audit.high_count > 0 && <span className="rounded bg-sev-high/10 px-1.5 py-0.5 font-medium text-sev-high">{audit.high_count}H</span>}
-          {audit.medium_count > 0 && <span className="rounded bg-sev-medium/10 px-1.5 py-0.5 font-medium text-sev-medium">{audit.medium_count}M</span>}
+          {audit.high_count > 0 && <span aria-label={`${audit.high_count} high findings`} className="rounded bg-sev-high/10 px-1.5 py-0.5 font-medium text-sev-high">{audit.high_count}H</span>}
+          {audit.medium_count > 0 && <span aria-label={`${audit.medium_count} medium findings`} className="rounded bg-sev-medium/10 px-1.5 py-0.5 font-medium text-sev-medium">{audit.medium_count}M</span>}
         </div>
         <span className="text-sm text-gray-500">{audit.total_findings} findings</span>
         <ChevronRight className="h-4 w-4 text-gray-600 transition-colors group-hover:text-gray-400" />
@@ -391,7 +374,7 @@ function PriorityFindingCard({ finding, auditId }: { finding: FindingOut; auditI
             Investigate
             <ArrowRight className="h-4 w-4" />
           </Link>
-          <Link href="/generate" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-gray-200 transition-colors hover:bg-white/[0.08]">
+          <Link href={`/generate?auditId=${auditId}&findingId=${finding.id}`} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-gray-200 transition-colors hover:bg-white/[0.08]">
             Generate Safer Rule
             <Wand2 className="h-4 w-4 text-flame-400" />
           </Link>
@@ -402,13 +385,13 @@ function PriorityFindingCard({ finding, auditId }: { finding: FindingOut; auditI
 }
 
 function FrameworkRow({ summary }: { summary: ComplianceSummary }) {
-  const passingRate = percent(summary.passed, summary.total_controls);
+  const passingRate = calculateFrameworkPassingRate(summary);
 
   return (
     <div className="rounded-xl border border-white/[0.06] bg-surface-800/80 p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold text-gray-100">{summary.framework}</p>
+          <p className="text-sm font-semibold text-gray-100">{frameworkLabel(summary.framework)}</p>
           <p className="mt-1 text-xs text-gray-500">
             {summary.failed} failed, {summary.passed} passed, {summary.not_applicable} not applicable
           </p>
@@ -444,7 +427,7 @@ function EmptyDashboard() {
             </div>
 
             <p className="mt-5 max-w-2xl text-base leading-relaxed text-gray-300">
-              FlameGuard is strongest when it has live audit data to prioritize. Upload an Azure Firewall or NSG export and the dashboard will reorganize itself around risk, compliance drift, and the next actions your team should take.
+              FlameGuard is strongest when it has live audit data to prioritize. Upload a network security configuration export or supported log bundle and the dashboard will reorganize itself around risk, compliance drift, and the next actions your team should take.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-3">
@@ -470,7 +453,7 @@ function EmptyDashboard() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <QuickAction href="/upload" icon={Upload} title="Upload Export" desc="Start the command center with a real Azure Firewall or NSG export." />
+        <QuickAction href="/upload" icon={Upload} title="Upload Export" desc="Start the command center with a real network security export or supported log bundle." />
         <QuickAction href="/generate" icon={Wand2} title="Generate Rule" desc="Draft a safer rule with natural language before you deploy it." />
         <QuickAction href="/chat" icon={MessageSquare} title="Ask Security Questions" desc="Use the assistant to explore remediation strategy and policy intent." />
       </div>
@@ -504,9 +487,8 @@ export default function DashboardPage() {
   const highTotal = orderedAudits.reduce((sum, audit) => sum + audit.high_count, 0);
   const mediumTotal = orderedAudits.reduce((sum, audit) => sum + audit.medium_count, 0);
   const lowTotal = orderedAudits.reduce((sum, audit) => sum + audit.low_count, 0);
-  const rulesTotal = orderedAudits.reduce((sum, audit) => sum + audit.rule_count, 0);
   const urgentFindings = criticalTotal + highTotal;
-  const postureScore = rulesTotal > 0 ? Math.max(0, Math.min(100, Math.round(100 - (urgentFindings / rulesTotal) * 100))) : 100;
+  const postureScore = focusAudit ? calculatePostureScore(focusAudit) : 100;
   const focusSeverityData = [
     { name: "Critical", value: focusAudit?.critical_count ?? 0, color: SEV.critical.color },
     { name: "High", value: focusAudit?.high_count ?? 0, color: SEV.high.color },
@@ -524,9 +506,9 @@ export default function DashboardPage() {
       return right.affected_rule_ids.length - left.affected_rule_ids.length;
     })
     .slice(0, 3);
-  const failedControls = (focusCompliance ?? []).reduce((sum, summary) => sum + summary.failed, 0);
-  const totalControls = (focusCompliance ?? []).reduce((sum, summary) => sum + summary.total_controls, 0);
-  const frameworkPassingRate = percent(totalControls - failedControls, totalControls);
+  const complianceStats = calculateComplianceStats(focusCompliance);
+  const failedControls = complianceStats?.failed ?? 0;
+  const frameworkPassingRate = complianceStats?.passingRate ?? 0;
   const focusUrgentCount = (focusAudit?.critical_count ?? 0) + (focusAudit?.high_count ?? 0);
   const activeAnalysis = latestAudit && latestAudit.status !== "completed" && latestAudit.status !== "failed" ? latestAudit : null;
 
@@ -578,7 +560,7 @@ export default function DashboardPage() {
               <SignalCard
                 label="Posture Score"
                 value={`${postureScore}%`}
-                note={`${urgentFindings} urgent findings across ${totalAudits} audits`}
+                note={focusAudit ? `${focusUrgentCount} urgent findings across ${focusAudit.rule_count} rules` : `${urgentFindings} urgent findings across ${totalAudits} audits`}
                 icon={ShieldCheck}
                 accent={postureScore >= 80 ? PASS_COLOR : postureScore >= 50 ? SEV.medium.color : SEV.critical.color}
               />
@@ -598,7 +580,7 @@ export default function DashboardPage() {
               />
               <SignalCard
                 label="Latest Scan"
-                value={relativeTime(latestAudit.created_at)}
+                value={formatRelativeTime(latestAudit.created_at)}
                 note={`${latestAudit.vendor} audit is ${latestAudit.status}`}
                 icon={Clock3}
                 accent={latestAudit.status === "completed" ? PASS_COLOR : SEV.medium.color}
@@ -614,7 +596,7 @@ export default function DashboardPage() {
                   <p className="fg-section-label">Investigation Focus</p>
                   <h2 className="mt-2 text-xl font-semibold text-white">{focusAudit?.filename ?? "No audit selected"}</h2>
                   <p className="mt-2 text-sm leading-relaxed text-gray-400">
-                    {focusAudit?.vendor ?? "Unknown vendor"} &middot; Selected for triage {relativeTime(focusAudit?.created_at ?? latestAudit.created_at)}
+                    {focusAudit?.vendor ?? "Unknown vendor"} &middot; Selected for triage {formatRelativeTime(focusAudit?.created_at ?? latestAudit.created_at)}
                   </p>
                 </div>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${focusAuditStatusStyle(focusAudit?.status ?? "pending")}`}>
@@ -694,7 +676,7 @@ export default function DashboardPage() {
           )}
 
           <div className="grid gap-4 md:grid-cols-3">
-            <QuickAction href="/upload" icon={Upload} title="Ingest New Config" desc="Upload the next Azure Firewall or NSG export without leaving the investigation flow." />
+            <QuickAction href="/upload" icon={Upload} title="Ingest New Config" desc="Upload the next network security export or supported log bundle without leaving the investigation flow." />
             <QuickAction href="/generate" icon={Wand2} title="Generate Safer Rule" desc="Turn remediation intent into a draft rule while the risky pattern is still in view." />
             <QuickAction href="/audit" icon={FileSearch} title="Review Audit Queue" desc="Jump across prior investigations, compare severity patterns, and reopen earlier scans." />
           </div>

@@ -3,6 +3,8 @@ properties:
     secrets:
       - name: openai-api-key
         value: <replace-locally>
+      - name: admin-api-token
+        value: <replace-locally-if-needed>
   template:
     containers:
       - name: flameguard-backend
@@ -19,6 +21,22 @@ properties:
             value: gpt-5.4-nano
           - name: CORS_ORIGINS
             value: '["https://<your-frontend-hostname>"]'
+          - name: RATE_LIMIT_ENABLED
+            value: "true"
+          - name: TRUST_PROXY_HEADERS
+            value: "true"
+          - name: UPLOAD_RATE_LIMIT_REQUESTS
+            value: "10"
+          - name: GENERATION_RATE_LIMIT_REQUESTS
+            value: "20"
+          - name: CHAT_RATE_LIMIT_REQUESTS
+            value: "12"
+          - name: READ_RATE_LIMIT_REQUESTS
+            value: "240"
+          - name: MAX_CONCURRENT_AUDIT_JOBS
+            value: "2"
+          - name: ADMIN_API_TOKEN
+            secretRef: admin-api-token
           - name: DB_PATH
             value: /tmp/flameguard.db
           - name: FLAMEGUARD_DB_PATH

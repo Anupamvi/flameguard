@@ -110,6 +110,7 @@ export interface RuleGenResponse {
   rule: RuleOut;
   explanation: string;
   confidence: number;
+  warnings: string[];
 }
 
 export interface ChatRequest {

@@ -9,6 +9,7 @@ from typing import Any
 
 class VendorType(str, Enum):
     AZURE_FIREWALL = "azure_firewall"
+    AZURE_GSA = "azure_gsa"
     AZURE_NSG = "azure_nsg"
     AZURE_WAF = "azure_waf"
 

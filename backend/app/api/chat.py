@@ -21,6 +21,7 @@ from app.models.audit import AuditFinding, AuditReport
 from app.models.chat import ChatMessage
 from app.models.rule import Rule
 from app.schemas.chat import ChatRequest
+from app.security import chat_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def _build_findings_summary(findings: list[AuditFinding]) -> str:
     return "\n".join(lines)
 
 
-@router.post("/audit/{audit_id}/chat")
+@router.post("/audit/{audit_id}/chat", dependencies=[Depends(chat_rate_limit)])
 async def chat_about_audit(
     audit_id: str,
     request: ChatRequest,
@@ -166,12 +167,12 @@ async def chat_about_audit(
 # ---------------------------------------------------------------------------
 
 SYSTEM_GENERAL = """\
-You are FlameGuard, an expert firewall and network security policy assistant. \
+You are FlameGuard, an expert network security policy assistant. \
 You help security engineers with:
-- Firewall rule design and best practices (Azure NSG, Azure Firewall, AWS SG, Palo Alto, etc.)
+- Network security policy design and best practices (Azure NSG, Azure Firewall, Azure WAF, AWS SG, Palo Alto, etc.)
 - Network segmentation strategies and zero-trust architectures
 - Compliance frameworks (CIS, PCI DSS, NIST, SOC 2) as they relate to network security
-- Troubleshooting connectivity issues caused by firewall rules
+- Troubleshooting connectivity issues caused by security policies and controls
 - Explaining security concepts in plain English
 
 Be concise, specific, and actionable. When discussing rules, use concrete examples \
@@ -181,7 +182,7 @@ Rule Generator page for vendor-specific output.
 """
 
 
-@router.post("/chat/general")
+@router.post("/chat/general", dependencies=[Depends(chat_rate_limit)])
 async def general_chat(request: ChatRequest):
     """General firewall policy chat — no audit context required. Returns SSE stream."""
 

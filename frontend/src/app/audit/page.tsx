@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ApiError } from "@/lib/api-client";
+import { getApiErrorMessage } from "@/lib/api-client";
 import { useAudits, useDeleteAudits } from "@/hooks/use-audit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,16 +17,7 @@ import {
 import { FileSearch, Loader2, ExternalLink, Trash2 } from "lucide-react";
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof ApiError) {
-    if (typeof error.body === "string") return error.body;
-    if (error.body && typeof error.body === "object" && "detail" in error.body) {
-      const detail = (error.body as { detail?: unknown }).detail;
-      if (typeof detail === "string") return detail;
-    }
-    return error.message;
-  }
-
-  return error instanceof Error ? error.message : "Failed to delete audits.";
+  return getApiErrorMessage(error, "Failed to delete audits.");
 }
 
 function statusColor(status: string) {
@@ -41,6 +32,7 @@ function statusColor(status: string) {
 }
 
 export default function AuditsPage() {
+  const auditDeleteEnabled = process.env.NEXT_PUBLIC_ENABLE_AUDIT_DELETE === "true";
   const { data: audits, isLoading, isError } = useAudits();
   const deleteAudits = useDeleteAudits();
   const [selectedAuditIds, setSelectedAuditIds] = useState<string[]>([]);
@@ -106,11 +98,11 @@ export default function AuditsPage() {
             Audit History
           </h2>
           <p className="fg-page-subtitle max-w-none">
-            View past firewall and NSG configuration audits
+            View past network security configuration and log audits
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {selectedAuditIds.length > 0 && (
+          {auditDeleteEnabled && selectedAuditIds.length > 0 && (
             <Button
               variant="destructive"
               onClick={() => handleDelete(selectedAuditIds)}
@@ -165,15 +157,17 @@ export default function AuditsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all audits"
-                    className="h-4 w-4 rounded border-white/[0.1]"
-                    checked={allSelected}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                  />
-                </TableHead>
+                {auditDeleteEnabled && (
+                  <TableHead>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all audits"
+                      className="h-4 w-4 rounded border-white/[0.1]"
+                      checked={allSelected}
+                      onChange={(event) => toggleSelectAll(event.target.checked)}
+                    />
+                  </TableHead>
+                )}
                 <TableHead>Vendor</TableHead>
                 <TableHead>Filename</TableHead>
                 <TableHead>Findings</TableHead>
@@ -185,15 +179,17 @@ export default function AuditsPage() {
             <TableBody>
               {audits.map((audit) => (
                 <TableRow key={audit.id} data-state={selectedAuditIds.includes(audit.id) ? "selected" : undefined}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select audit ${audit.filename}`}
-                      className="h-4 w-4 rounded border-white/[0.1]"
-                      checked={selectedAuditIds.includes(audit.id)}
-                      onChange={() => toggleAuditSelection(audit.id)}
-                    />
-                  </TableCell>
+                  {auditDeleteEnabled && (
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select audit ${audit.filename}`}
+                        className="h-4 w-4 rounded border-white/[0.1]"
+                        checked={selectedAuditIds.includes(audit.id)}
+                        onChange={() => toggleAuditSelection(audit.id)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">{audit.vendor}</TableCell>
                   <TableCell className="max-w-[200px] truncate text-gray-400">
                     {audit.filename}
@@ -215,14 +211,16 @@ export default function AuditsPage() {
                       >
                         View <ExternalLink className="h-3 w-3" />
                       </Link>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete([audit.id])}
-                        disabled={deleteAudits.isPending}
-                      >
-                        <Trash2 className="h-4 w-4" /> Delete
-                      </Button>
+                      {auditDeleteEnabled && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete([audit.id])}
+                          disabled={deleteAudits.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -75,6 +75,12 @@ class UploadResponse(BaseModel):
     parse_warnings: list[str] = []
 
 
+class TextUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1)
+    vendor_hint: Optional[str] = Field(default=None, max_length=64)
+
+
 class DeleteAuditsRequest(BaseModel):
     audit_ids: list[str] = Field(min_length=1, max_length=100)
 

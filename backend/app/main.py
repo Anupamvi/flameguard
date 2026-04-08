@@ -6,6 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import async_session, engine, init_db
+from app.security import (
+    ADMIN_TOKEN_HEADER,
+    RATE_LIMIT_HEADER_LIMIT,
+    RATE_LIMIT_HEADER_REMAINING,
+    RATE_LIMIT_HEADER_RESET,
+    apply_api_security_headers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +38,12 @@ async def lifespan(app: FastAPI):
             pass  # column already exists
 
     from app.seed_demo import seed_demo
+    from app.privacy_backfill import backfill_privacy_redactions
     async with async_session() as db:
         result = await seed_demo(db)
         logger.info("Demo seed: %s", result.get("status", "unknown"))
+        backfill_result = await backfill_privacy_redactions(db)
+        logger.info("Privacy backfill: %s", backfill_result)
 
     yield
 
@@ -41,7 +51,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="FlameGuard",
-        description="LLM-powered firewall rule auditor and policy generator",
+        description="LLM-powered network security configuration and log auditor with policy generation",
         version="0.1.0",
         lifespan=lifespan,
         debug=False,
@@ -49,11 +59,18 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.parsed_cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", ADMIN_TOKEN_HEADER],
+        expose_headers=[RATE_LIMIT_HEADER_LIMIT, RATE_LIMIT_HEADER_REMAINING, RATE_LIMIT_HEADER_RESET, "Retry-After"],
     )
+
+    @app.middleware("http")
+    async def security_headers_middleware(request, call_next):
+        response = await call_next(request)
+        apply_api_security_headers(request, response)
+        return response
 
     from app.api import audit, chat, compliance, generate, rules, seed, upload
 

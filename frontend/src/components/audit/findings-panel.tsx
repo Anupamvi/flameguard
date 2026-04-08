@@ -1,12 +1,14 @@
 "use client";
 
 import type { FindingOut } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, AlertCircle, Info, ShieldAlert, ShieldX, CheckCircle2, Cpu, BrainCircuit } from "lucide-react";
 
 interface FindingsPanelProps {
   findings: FindingOut[];
+  highlightedFindingId?: string | null;
 }
 
 function severityConfig(severity: string) {
@@ -59,7 +61,7 @@ function confidenceColor(confidence: number): string {
 
 const severityOrder = ["critical", "high", "medium", "low", "info"];
 
-export function FindingsPanel({ findings }: FindingsPanelProps) {
+export function FindingsPanel({ findings, highlightedFindingId }: FindingsPanelProps) {
   if (findings.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-gray-500">
@@ -124,7 +126,15 @@ export function FindingsPanel({ findings }: FindingsPanelProps) {
                 const src = sourceConfig(finding.source || "llm");
                 const SrcIcon = src.icon;
                 return (
-                  <Card key={finding.id} className={`border ${config.border} ${config.leftBorder}`}>
+                  <Card
+                    key={finding.id}
+                    id={`finding-${finding.id}`}
+                    data-highlighted={finding.id === highlightedFindingId ? "true" : undefined}
+                    className={cn(
+                      `scroll-mt-24 border ${config.border} ${config.leftBorder}`,
+                      finding.id === highlightedFindingId && "border-flame-500/40 bg-flame-500/[0.04] ring-2 ring-flame-500/30",
+                    )}
+                  >
                     <CardHeader className="pb-2">
                       <div className="flex items-start gap-3">
                         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />

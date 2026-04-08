@@ -69,8 +69,10 @@ FRONTEND_IMAGE=<registry>.azurecr.io/flameguard-frontend:<tag>
 
 ```bash
 az acr build --registry $ACR_NAME --image flameguard-backend:<tag> --file backend/Dockerfile backend/
-az acr build --registry $ACR_NAME --image flameguard-frontend:<tag> --file frontend/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://<backend-host>/api/v1 frontend/
+az acr build --registry $ACR_NAME --image flameguard-frontend:<tag> --file frontend/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://<front-door-host>/api/v1 frontend/
 ```
+
+For public builds, also set `NEXT_PUBLIC_SITE_URL=https://<front-door-host>` or your Front Door custom domain so frontend metadata and shared links never fall back to the direct Container App origin.
 
 ### Secrets and Environment
 
@@ -98,6 +100,50 @@ UPLOAD_MAX_SIZE_MB=50
 
 The backend privacy layer sanitizes Azure subscription, resource group, and tenant identifiers before LLM-bound prompts are assembled. Keep treating raw exports as sensitive anyway, and do not use this sanitization step as a reason to commit live data.
 
+### Public Deployment Hardening
+
+For a public deployment, keep the UI public and harden the expensive or destructive backend surfaces:
+
+- enable API rate limiting with `RATE_LIMIT_ENABLED=true`
+- tune `UPLOAD_RATE_LIMIT_*`, `GENERATION_RATE_LIMIT_*`, `CHAT_RATE_LIMIT_*`, and `READ_RATE_LIMIT_*` for your expected traffic
+- cap per-instance background audit fan-out with `MAX_CONCURRENT_AUDIT_JOBS`
+- set `TRUST_PROXY_HEADERS=true` when running behind Container Apps ingress or another trusted reverse proxy
+- keep `TRUSTED_PROXY_CIDRS` limited to the networks that should be allowed to supply forwarded client IP headers
+- when Azure Front Door is the public edge, set a secret `FRONT_DOOR_ORIGIN_TOKEN` value in the backend and inject the same value on the backend route with a Front Door rules engine request-header action
+- protect destructive routes with `ADMIN_API_TOKEN`; without it, `DELETE /api/v1/audit*` and `POST /api/v1/seed-demo` stay disabled
+
+Current recommended public posture for this repo:
+
+- publish the app through Azure Front Door and point the frontend at `https://<front-door-host>/api/v1`
+- set `NEXT_PUBLIC_SITE_URL=https://<front-door-host>` so metadata, previews, and any derived public links use the Front Door hostname
+- keep the direct Container Apps hostnames as implementation details rather than the advertised public URL
+- rely on the in-app rate limiting, background job caps, admin-token protection, and response hardening already implemented in the backend and frontend
+
+For true origin lockdown on external Container Apps, sync the current `AzureFrontDoor.Backend` IPv4 service-tag ranges into each app's `configuration.ingress.ipSecurityRestrictions` allowlist. Container Apps ingress restrictions only accept IPv4 CIDRs, while the Front Door service tag output can include IPv6 ranges, so generate this allowlist programmatically instead of curating it by hand.
+
+The repo includes a PowerShell helper for this workflow:
+
+```powershell
+pwsh ./scripts/sync-containerapp-ip-restrictions-to-afd.ps1 \
+	-SubscriptionId <subscription-id> \
+	-ResourceGroup <resource-group> \
+	-ContainerAppName flameguard-frontend,flameguard-backend \
+	-Location <service-tag-location>
+```
+
+Re-run that sync whenever Microsoft updates the Azure Front Door backend service-tag ranges or when you recreate the Container Apps.
+
+The repo also includes `.github/workflows/sync-containerapp-ip-restrictions-to-afd.yml` so GitHub Actions can run the same sync on a schedule or by manual dispatch. Configure these GitHub Actions settings before enabling it:
+
+- secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
+- variables: `FLAMEGUARD_RESOURCE_GROUP`, `FLAMEGUARD_CONTAINER_APPS` (comma-separated Container App names), `FLAMEGUARD_SERVICE_TAG_LOCATION`
+
+The workflow uses Azure OIDC login through `azure/login` and defaults the service-tag lookup location to `eastus` when no variable or manual input is supplied.
+
+As of 2026-04-07, this Standard Azure Front Door setup does not have an attached AFD security policy. Attempts to create `Microsoft.Cdn/CdnWebApplicationFirewallPolicies` in this environment fail with CDN WAF retirement errors, so the accepted state is Front Door routing plus application-layer hardening unless you move to a different supported edge-security path or SKU.
+
+The frontend audit-delete UI is intended to stay off for public builds unless you explicitly enable an admin-capable frontend separately.
+
 ### Container Apps Manifest Usage
 
 The tracked files [backend-container-app.yaml](../backend-container-app.yaml) and [container-env.yaml](../container-env.yaml) are sanitized examples only.
@@ -109,6 +155,24 @@ Recommended approach:
 3. Inject secrets through Container Apps secrets instead of checking them into git.
 
 If you customize the frontend ingress path, preserve the nonce-aware CSP behavior implemented by the frontend server and middleware files. Static CSP overrides that drop the nonce will break the app.
+
+## Global Secure Access Exports
+
+FlameGuard can now ingest Microsoft Entra Global Secure Access exports in addition to Azure Firewall, NSG, and WAF inputs.
+
+Supported GSA log families:
+
+- Audit logs filtered to the `Global Secure Access` service in Microsoft Entra audit logs
+- Deployment logs from `Global Secure Access > Monitor > Deployment logs`
+- Traffic log exports routed through Microsoft Entra diagnostic settings with the `NetworkAccessTrafficLogs` category enabled
+
+Current Microsoft guidance points to these locations:
+
+- `Global Secure Access > Monitor > Audit logs` or `Entra ID > Monitoring & health > Audit logs` with the `Global Secure Access` service filter
+- `Global Secure Access > Monitor > Deployment logs`
+- `Entra ID > Monitoring & health > Diagnostic settings` to export `NetworkAccessTrafficLogs` to Log Analytics, storage, Event Hubs, or partner destinations
+
+For public-repo workflows, prefer uploading sanitized JSON or CSV exports rather than raw tenant archives. Traffic logs contain the most network-specific context, while audit and deployment logs capture forwarding-profile, remote-network, and related control-plane changes.
 
 ## Durable Storage
 
@@ -133,8 +197,8 @@ Before pushing or opening a pull request:
 After a backend or frontend rollout:
 
 1. Wait until `latestRevisionName` matches `latestReadyRevisionName` for each Container App.
-2. Verify the backend health endpoint returns success.
-3. Verify the frontend root route and key app routes load successfully.
+2. Verify the backend health endpoint returns success through the Front Door hostname.
+3. Verify the frontend root route and key app routes load successfully through the Front Door hostname.
 4. Optionally seed demo data with `POST /api/v1/seed-demo` and confirm `/api/v1/audits` returns records.
 
 Example checks:

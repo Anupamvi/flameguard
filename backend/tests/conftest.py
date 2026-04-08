@@ -4,7 +4,16 @@ from pathlib import Path
 
 import pytest
 
+from app.security import reset_security_state
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def reset_hardening_state():
+    reset_security_state()
+    yield
+    reset_security_state()
 
 
 @pytest.fixture
@@ -310,6 +319,108 @@ def waf_log_export_empty_raw():
                     {"name": "transactionId_g", "type": "string"},
                 ],
                 "rows": [],
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def waf_log_export_appgw_csv() -> bytes:
+    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleId_s,ruleName_s,action_s,details_message_s,hostname_s,policyId_s,policyScope_s,policyScopeName_s,engine_s,timeStamp_t [UTC],transactionId_g,clientIp_s,clientPort_s,listenerName_s,Type,_ResourceId\n962f6a50-fc8d-49c6-a2d1-69dc57709cd9,2023-07-30T23:55:35.522Z,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/applicationGateways/appgw,ApplicationGatewayFirewallLog,https://shop.contoso.com/login?debug=1,942100,SQLiBlock,Blocked,Detected SQL injection pattern,shop.contoso.com,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/policy,Global,Global,Azwaf,2023-07-30T23:54:23.000Z,11111111-2222-3333-4444-555555555555,198.51.100.24,58231,public-https-listener,AzureDiagnostics,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/applicationGateways/appgw\n"""
+
+
+@pytest.fixture
+def waf_log_export_afd_csv() -> bytes:
+    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleName_s,action_s,details_matches_s,hostName_s,trackingReference_s,policyMode_s,clientIp_s,clientPort_s,Type,_ResourceId\n8ecf8077-cf51-4820-aadd-14040956f35d,2023-06-27T05:13:01.577Z,/subscriptions/2/resourceGroups/soc-ns/providers/Microsoft.Cdn/profiles/demowasp-prem,FrontDoorWebApplicationFirewallLog,https://demowasp.z01.azurefd.net:443/,RedirectFirefoxUserAgent,Redirect,"[{""matchVariableName"":""HeaderValue:user-agent"",""matchVariableValue"":""rv:109.0""}]",demowasp.z01.azurefd.net,03W+aZAAAAAA,prevention,203.0.113.8,61084,AzureDiagnostics,/subscriptions/2/resourceGroups/soc-ns/providers/Microsoft.Cdn/profiles/demowasp-prem\n"""
+
+
+@pytest.fixture
+def gsa_audit_log_export_raw():
+    return {
+        "value": [
+            {
+                "id": "8f2c2921-8f1b-4db3-9c5f-5f1a6d117901",
+                "activityDateTime": "2026-04-08T10:15:00Z",
+                "loggedByService": "Global Secure Access",
+                "category": "Forwarding Profiles",
+                "activityDisplayName": "Updated forwarding profile",
+                "operationType": "Update",
+                "result": "success",
+                "resultReason": "Forwarding profile updated successfully",
+                "initiatedBy": {
+                    "user": {
+                        "userPrincipalName": "admin@contoso.com",
+                        "displayName": "Contoso Admin",
+                    }
+                },
+                "targetResources": [
+                    {"displayName": "Corporate forwarding profile", "type": "ForwardingProfile"}
+                ],
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def gsa_audit_log_export_csv() -> bytes:
+    return b"""Activity Date Time,Logged By Service,Category,Activity Display Name,Operation Type,Result,Result Reason,Initiated By,Target Resources,Id\n2026-04-08T10:15:00Z,Global Secure Access,Forwarding Profiles,Updated forwarding profile,Update,success,Forwarding profile updated successfully,admin@contoso.com,Corporate forwarding profile,8f2c2921-8f1b-4db3-9c5f-5f1a6d117901\n"""
+
+
+@pytest.fixture
+def gsa_traffic_log_export_raw():
+    return {
+        "tables": [
+            {
+                "name": "NetworkAccessTraffic",
+                "columns": [
+                    {"name": "ActivityDateTime", "type": "datetime"},
+                    {"name": "ConnectionId", "type": "string"},
+                    {"name": "TransactionId", "type": "string"},
+                    {"name": "TrafficType", "type": "string"},
+                    {"name": "Action", "type": "string"},
+                    {"name": "Protocol", "type": "string"},
+                    {"name": "SourceIp", "type": "string"},
+                    {"name": "SourcePort", "type": "int"},
+                    {"name": "DestinationFqdn", "type": "string"},
+                    {"name": "DestinationPort", "type": "int"},
+                    {"name": "UserPrincipalName", "type": "string"},
+                    {"name": "DeviceCategory", "type": "string"},
+                    {"name": "Category", "type": "string"},
+                ],
+                "rows": [
+                    [
+                        "2026-04-08T10:20:00Z",
+                        "conn-12345",
+                        "txn-67890",
+                        "Microsoft 365",
+                        "Denied",
+                        "HTTPS",
+                        "198.51.100.24",
+                        58231,
+                        "sharepoint.contoso.com",
+                        443,
+                        "alex@contoso.com",
+                        "client",
+                        "NetworkAccessTrafficLogs",
+                    ]
+                ],
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def gsa_deployment_log_export_raw():
+    return {
+        "records": [
+            {
+                "Date": "2026-04-08T10:25:00Z",
+                "Activity": "Redistribute Forwarding Profile",
+                "Status": "Deployment Successful",
+                "Initiated By": "admin@contoso.com",
+                "Type": "forwardingProfile",
+                "Request ID": "req-123456",
+                "Error Messages": "",
             }
         ]
     }

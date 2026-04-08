@@ -4,6 +4,8 @@ import Link from "next/link";
 import React from "react";
 import { useSearchParams } from "next/navigation";
 import { useAudit, useAuditRules, useAuditCompliance } from "@/hooks/use-audit";
+import { calculateComplianceStats, calculatePostureScore, percent } from "@/lib/audit-metrics";
+import { formatRelativeTime, parseTimestamp } from "@/lib/time";
 import type { AuditResponse, ComplianceSummary, FindingOut, RuleOut } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -86,47 +88,18 @@ function truncateText(value: string | null | undefined, maxLength: number) {
 
 function formatDateTime(timestamp: string | null | undefined) {
   if (!timestamp) return "Not available";
+
+  const parsed = parseTimestamp(timestamp);
+  if (!parsed) {
+    return "Not available";
+  }
+
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(timestamp));
-}
-
-function relativeTime(timestamp: string | null | undefined) {
-  if (!timestamp) return "just now";
-
-  const now = Date.now();
-  const value = new Date(timestamp).getTime();
-  const diffMinutes = Math.round((value - now) / 60000);
-  const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-  if (Math.abs(diffMinutes) < 60) {
-    return formatter.format(diffMinutes, "minute");
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) {
-    return formatter.format(diffHours, "hour");
-  }
-
-  return formatter.format(Math.round(diffHours / 24), "day");
-}
-
-function percent(part: number, whole: number) {
-  if (whole <= 0) return 0;
-  return Math.round((part / whole) * 100);
-}
-
-function calculatePostureScore(audit: AuditResponse) {
-  const severityPressure =
-    audit.critical_count * 5 +
-    audit.high_count * 3 +
-    audit.medium_count * 2 +
-    audit.low_count;
-  const denominator = Math.max(1, audit.rule_count * 3);
-  return Math.max(0, Math.min(100, 100 - Math.round((severityPressure / denominator) * 100)));
+  }).format(parsed);
 }
 
 function isWildcardPort(value: string) {
@@ -370,9 +343,11 @@ function ExposureRuleRow({
 
 function PriorityFindingCard({
   finding,
+  auditId,
   onReview,
 }: {
   finding: FindingOut;
+  auditId: string;
   onReview: () => void;
 }) {
   const tone = findingTone(finding.severity);
@@ -434,7 +409,7 @@ function PriorityFindingCard({
             <ArrowRight className="h-4 w-4" />
           </button>
           <Link
-            href="/generate"
+            href={`/generate?auditId=${auditId}&findingId=${finding.id}`}
             className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-gray-200 transition-colors hover:bg-white/[0.08]"
           >
             Generate Safer Rule
@@ -453,7 +428,9 @@ export default function AuditDetailPage({
 }) {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
+  const requestedFindingId = searchParams.get("finding");
   const [activeTab, setActiveTab] = React.useState<AuditTab>(isAuditTab(requestedTab) ? requestedTab : "overview");
+  const lastFindingScrollRef = React.useRef<string | null>(null);
   const { id } = React.use(params);
   const { data: audit, isLoading: auditLoading } = useAudit(id);
   const {
@@ -470,10 +447,34 @@ export default function AuditDetailPage({
   React.useEffect(() => {
     if (isAuditTab(requestedTab)) {
       setActiveTab(requestedTab);
+      return;
     }
-  }, [requestedTab]);
+    if (requestedFindingId) {
+      setActiveTab("findings");
+    }
+  }, [requestedFindingId, requestedTab]);
 
   const auditFindings = audit?.findings ?? [];
+
+  React.useEffect(() => {
+    if (activeTab !== "findings" || !requestedFindingId || auditFindings.length === 0) {
+      return;
+    }
+
+    const scrollKey = `${id}:${requestedFindingId}`;
+    if (lastFindingScrollRef.current === scrollKey) {
+      return;
+    }
+
+    const target = document.getElementById(`finding-${requestedFindingId}`);
+    if (!target) {
+      return;
+    }
+
+    lastFindingScrollRef.current = scrollKey;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeTab, auditFindings.length, id, requestedFindingId]);
+
   const ruleList = rules ?? [];
   const postureScore = audit ? calculatePostureScore(audit) : 100;
   const priorityFindings = React.useMemo(
@@ -501,19 +502,7 @@ export default function AuditDetailPage({
     [internetExposedRules],
   );
   const complianceStats = React.useMemo(() => {
-    if (!compliance || compliance.length === 0) return null;
-
-    const failed = compliance.reduce((sum, summary) => sum + summary.failed, 0);
-    const applicable = compliance.reduce(
-      (sum, summary) => sum + (summary.total_controls - summary.not_applicable),
-      0,
-    );
-
-    return {
-      failed,
-      applicable,
-      passingRate: applicable > 0 ? percent(applicable - failed, applicable) : 100,
-    };
+    return calculateComplianceStats(compliance);
   }, [compliance]);
 
   if (auditLoading) {
@@ -526,8 +515,24 @@ export default function AuditDetailPage({
 
   if (!audit) {
     return (
-      <div className="flex h-64 items-center justify-center text-sm text-gray-500">
-        Audit not found.
+      <div className="mx-auto flex h-[70vh] max-w-2xl items-center justify-center">
+        <div className="w-full rounded-[28px] border border-white/[0.08] bg-surface-800/80 p-8 text-center shadow-lg">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-flame-300/80">Audit not found</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">That audit does not exist in the current queue.</h1>
+          <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-gray-400">
+            Return to the audit history or upload a fresh export to start a new investigation.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <Link href="/audit" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100">
+              All Audits
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link href="/upload" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-gray-200 transition-colors hover:bg-white/[0.08]">
+              Upload Fresh Export
+              <Upload className="h-4 w-4 text-flame-400" />
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -572,7 +577,7 @@ export default function AuditDetailPage({
                 ID {audit.id.slice(0, 8)}...
               </span>
               <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-gray-400">
-                Opened {relativeTime(audit.created_at)}
+                Opened {formatRelativeTime(audit.created_at)}
               </span>
             </div>
 
@@ -634,7 +639,7 @@ export default function AuditDetailPage({
                 <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Opened</p>
                   <p className="mt-2 text-lg font-semibold text-white">{formatDateTime(audit.created_at)}</p>
-                  <p className="mt-1 text-xs text-gray-500">{relativeTime(audit.created_at)}</p>
+                  <p className="mt-1 text-xs text-gray-500">{formatRelativeTime(audit.created_at)}</p>
                 </div>
                 <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Completed</p>
@@ -752,6 +757,7 @@ export default function AuditDetailPage({
                     <PriorityFindingCard
                       key={finding.id}
                       finding={finding}
+                      auditId={id}
                       onReview={() => setActiveTab("findings")}
                     />
                   ))}
@@ -867,7 +873,7 @@ export default function AuditDetailPage({
               {audit.total_findings} total findings
             </div>
           </div>
-          <FindingsPanel findings={audit.findings} />
+          <FindingsPanel findings={audit.findings} highlightedFindingId={activeTab === "findings" ? requestedFindingId : null} />
         </TabsContent>
 
         <TabsContent value="rules" className="mt-4 space-y-4">
