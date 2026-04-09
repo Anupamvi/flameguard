@@ -119,29 +119,6 @@ Current recommended public posture for this repo:
 - keep the direct Container Apps hostnames as implementation details rather than the advertised public URL
 - rely on the in-app rate limiting, background job caps, admin-token protection, and response hardening already implemented in the backend and frontend
 
-For true origin lockdown on external Container Apps, sync the current `AzureFrontDoor.Backend` IPv4 service-tag ranges into each app's `configuration.ingress.ipSecurityRestrictions` allowlist. Container Apps ingress restrictions only accept IPv4 CIDRs, while the Front Door service tag output can include IPv6 ranges, so generate this allowlist programmatically instead of curating it by hand.
-
-The repo includes a PowerShell helper for this workflow:
-
-```powershell
-pwsh ./scripts/sync-containerapp-ip-restrictions-to-afd.ps1 \
-	-SubscriptionId <subscription-id> \
-	-ResourceGroup <resource-group> \
-	-ContainerAppName flameguard-frontend,flameguard-backend \
-	-Location <service-tag-location>
-```
-
-Re-run that sync whenever Microsoft updates the Azure Front Door backend service-tag ranges or when you recreate the Container Apps.
-
-The repo also includes `.github/workflows/sync-containerapp-ip-restrictions-to-afd.yml` so GitHub Actions can run the same sync on a schedule or by manual dispatch. Configure these GitHub Actions settings before enabling it:
-
-- secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-- variables: `FLAMEGUARD_RESOURCE_GROUP`, `FLAMEGUARD_CONTAINER_APPS` (comma-separated Container App names), `FLAMEGUARD_SERVICE_TAG_LOCATION`
-
-The workflow uses Azure OIDC login through `azure/login` and defaults the service-tag lookup location to `eastus` when no variable or manual input is supplied.
-
-As of 2026-04-07, this Standard Azure Front Door setup does not have an attached AFD security policy. Attempts to create `Microsoft.Cdn/CdnWebApplicationFirewallPolicies` in this environment fail with CDN WAF retirement errors, so the accepted state is Front Door routing plus application-layer hardening unless you move to a different supported edge-security path or SKU.
-
 The frontend audit-delete UI is intended to stay off for public builds unless you explicitly enable an admin-capable frontend separately.
 
 ### Container Apps Manifest Usage

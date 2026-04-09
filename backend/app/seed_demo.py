@@ -19,7 +19,7 @@ from app.models.compliance import ComplianceCheck
 from app.models.rule import Rule, RuleSet
 
 # Deterministic namespace so re-seeding is idempotent
-_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+_NS = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 def _id(name: str) -> str:
     return str(uuid.uuid5(_NS, name))
@@ -196,7 +196,7 @@ def _build_rule_objects(ruleset_id: str) -> list[Rule]:
         rules.append(Rule(
             id=_id(f"rule-{i}"),
             ruleset_id=ruleset_id,
-            original_id=f"nsg-prod-{i+1:03d}",
+            original_id=f"nsg-sample-{i+1:03d}",
             name=r["name"],
             action=r["action"],
             direction=r["direction"],
@@ -451,7 +451,7 @@ async def seed_demo(db: AsyncSession) -> dict:
 
     # Build raw JSON that resembles an uploaded NSG export
     raw_nsg = {
-        "name": "nsg-prod-eastus",
+        "name": "nsg-sample",
         "location": "eastus",
         "properties": {
             "securityRules": [
@@ -478,7 +478,7 @@ async def seed_demo(db: AsyncSession) -> dict:
     # Create RuleSet
     ruleset = RuleSet(
         id=DEMO_RULESET_ID,
-        filename="nsg-prod-eastus-export.json",
+        filename="nsg-sample-export.json",
         vendor="azure_nsg",
         raw_json=json.dumps(raw_nsg),
         rule_count=len(_RULES),
@@ -505,7 +505,7 @@ async def seed_demo(db: AsyncSession) -> dict:
         ruleset_id=DEMO_RULESET_ID,
         status="completed",
         summary=(
-         f"Audit of nsg-prod-eastus identified {len(all_findings)} security findings across "
+         f"Audit of nsg-sample identified {len(all_findings)} security findings across "
             f"{len(_RULES)} rules. "
             f"{sev_counts['critical']} critical and {sev_counts['high']} high-severity issues "
             "require immediate attention. The most urgent finding is an unrestricted "

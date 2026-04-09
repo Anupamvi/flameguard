@@ -87,7 +87,7 @@ class TestAzureWAFParser:
                             "details_message_s": "Detected SQL injection pattern",
                             "hostname_s": "shop.contoso.com",
                             "timeStamp_t": "2023-07-30T23:55:23.000Z",
-                            "transactionId_g": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "transactionId_g": "00000000-0000-0000-0000-000000000000",
                             "clientIp_s": "198.51.100.25",
                             "clientPort_s": "58232",
                         },

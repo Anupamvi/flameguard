@@ -106,10 +106,6 @@ For the current public deployment model, use Azure Front Door as the public entr
 
 If you publish share links, metadata previews, or URL shorteners for the app, point them at the Azure Front Door hostname or a custom domain bound to Front Door. Direct Container App hostnames now return `403 RBAC: access denied` by design.
 
-If you keep Container Apps ingress `external: true`, use Container Apps IP security restrictions to allow only the current `AzureFrontDoor.Backend` IPv4 ranges and refresh that allowlist as the service tag changes. The deployment guide documents this flow and the repo now includes [scripts/sync-containerapp-ip-restrictions-to-afd.ps1](scripts/sync-containerapp-ip-restrictions-to-afd.ps1) to automate it.
-
-As of 2026-04-07, the Standard Azure Front Door configuration used here does not have an attached AFD security policy. Managed/custom WAF policy creation is blocked in this environment by CDN WAF retirement errors, so additional edge WAF coverage requires a different supported Azure path or SKU.
-
 ## Sample Data
 
 Public sample fixtures belong under backend/tests/fixtures or backend/tests/conftest.py and must stay synthetic or sanitized.

@@ -1,5 +1,5 @@
 {
-  "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultNetworkRuleCollectionGroup",
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-sample-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-sample/ruleCollectionGroups/DefaultNetworkRuleCollectionGroup",
   "name": "DefaultNetworkRuleCollectionGroup",
   "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
   "properties": {
@@ -165,7 +165,7 @@
   },
   "_siblings": {
     "ApplicationRuleCollectionGroup": {
-      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultApplicationRuleCollectionGroup",
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-sample-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-sample/ruleCollectionGroups/DefaultApplicationRuleCollectionGroup",
       "name": "DefaultApplicationRuleCollectionGroup",
       "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
       "properties": {
@@ -260,7 +260,7 @@
       }
     },
     "NatRuleCollectionGroup": {
-      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-prod-eastus2/ruleCollectionGroups/DefaultDnatRuleCollectionGroup",
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-sample-networking/providers/Microsoft.Network/firewallPolicies/fw-policy-sample/ruleCollectionGroups/DefaultDnatRuleCollectionGroup",
       "name": "DefaultDnatRuleCollectionGroup",
       "type": "Microsoft.Network/firewallPolicies/ruleCollectionGroups",
       "properties": {

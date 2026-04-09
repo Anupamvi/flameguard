@@ -9,12 +9,12 @@ const findingTitle = "Unrestricted inbound access from internet";
 const auditResponse = {
   id: auditId,
   ruleset_id: rulesetId,
-  filename: "nsg-prod-eastus-export.json",
+  filename: "nsg-sample-export.json",
   vendor: "azure_nsg",
   rule_count: 1,
   status: "completed",
   summary:
-    "Audit of nsg-prod-eastus identified one critical finding tied to a permissive inbound rule.",
+    "Audit of nsg-sample identified one critical finding tied to a permissive inbound rule.",
   error_message: null,
   findings: [
     {

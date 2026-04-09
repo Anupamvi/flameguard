@@ -1,10 +1,10 @@
 {
-  "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-networking/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/waf-policy-prod-appgw",
-  "name": "waf-policy-prod-appgw",
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-sample-networking/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/waf-policy-sample-appgw",
+  "name": "waf-policy-sample-appgw",
   "type": "Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies",
   "location": "eastus2",
   "tags": {
-    "environment": "production",
+    "environment": "sample",
     "team": "appsec"
   },
   "properties": {

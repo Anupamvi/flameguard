@@ -40,7 +40,7 @@ def firewall_log_export_normalized():
         "exportedAt": "2026-04-05T11:29:25.9470682-07:00",
         "subscription": "Example Firewall Subscription",
         "workspace": "sample-firewall-logs-workspace",
-        "workspaceCustomerId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "workspaceCustomerId": "00000000-0000-0000-0000-000000000000",
         "firewallResourceId": "/subscriptions/11111111-2222-3333-4444-555555555555/resourcegroups/sample-rg-firewall/providers/microsoft.network/azurefirewalls/sample-firewall",
         "summary": [
             {"LogTable": "AZFWDnsQuery", "Count": 1},
@@ -49,7 +49,7 @@ def firewall_log_export_normalized():
         ],
         "dnsSamples": [
             {
-                "TenantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
                 "TimeGenerated": "2026-03-24T06:46:56.516467Z",
                 "SourceIp": "10.0.1.7",
                 "SourcePort": 8348,
@@ -65,7 +65,7 @@ def firewall_log_export_normalized():
         ],
         "applicationSamples": [
             {
-                "TenantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
                 "TimeGenerated": "2026-03-24T06:45:40.121992Z",
                 "Protocol": "HTTPS",
                 "SourceIp": "10.0.2.4",
@@ -84,7 +84,7 @@ def firewall_log_export_normalized():
         ],
         "diagnosticsSamples": [
             {
-                "TenantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "TenantId": "00000000-0000-0000-0000-000000000000",
                 "TimeGenerated": "2026-03-16T19:31:40.246683Z",
                 "Category": "AZFWFlowTrace",
                 "SourceIP": "10.0.2.4",
@@ -107,7 +107,7 @@ def firewall_log_export_raw():
         "exportedAt": "2026-04-05T11:28:40.2829663-07:00",
         "subscription": "Example Firewall Subscription",
         "workspace": "sample-firewall-logs-workspace",
-        "workspaceCustomerId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "workspaceCustomerId": "00000000-0000-0000-0000-000000000000",
         "summary": {
             "tables": [
                 {
@@ -138,7 +138,7 @@ def firewall_log_export_raw():
                     ],
                     "rows": [
                         [
-                            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "00000000-0000-0000-0000-000000000000",
                             "2026-03-24T06:46:56.516467Z",
                             "10.0.1.7",
                             8348,
@@ -277,18 +277,18 @@ def waf_log_export_bundle(waf_log_export_raw):
     return {
         "exportedAt": "2026-04-06T12:34:24.7235460-07:00",
         "workspace": {
-            "name": "CH1-LA-PRD",
-            "customerId": "822b3148-c451-4ceb-bab4-7b6df7aa3064",
+            "name": "sample-log-analytics",
+            "customerId": "00000000-0000-0000-0000-000000000000",
         },
         "wafResources": [
             {
-                "name": "CH1-AppFEAppGate-Pri",
-                "resourceId": "/subscriptions/ebb79bc0-aa86-44a7-8111-cabbe0c43993/resourceGroups/CH1-RetailRG-Pri/providers/Microsoft.Network/applicationGateways/CH1-AppFEAppGate-Pri",
+                "name": "sample-app-gateway",
+                "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-appgw/providers/Microsoft.Network/applicationGateways/sample-app-gateway",
             }
         ],
         "diagnosticSettings": [
             {
-                "name": "SetByCustomPolicy",
+                "name": "sample-diagnostic-setting",
                 "categories": [
                     "ApplicationGatewayAccessLog",
                     "ApplicationGatewayPerformanceLog",
@@ -326,12 +326,12 @@ def waf_log_export_empty_raw():
 
 @pytest.fixture
 def waf_log_export_appgw_csv() -> bytes:
-    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleId_s,ruleName_s,action_s,details_message_s,hostname_s,policyId_s,policyScope_s,policyScopeName_s,engine_s,timeStamp_t [UTC],transactionId_g,clientIp_s,clientPort_s,listenerName_s,Type,_ResourceId\n962f6a50-fc8d-49c6-a2d1-69dc57709cd9,2023-07-30T23:55:35.522Z,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/applicationGateways/appgw,ApplicationGatewayFirewallLog,https://shop.contoso.com/login?debug=1,942100,SQLiBlock,Blocked,Detected SQL injection pattern,shop.contoso.com,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/policy,Global,Global,Azwaf,2023-07-30T23:54:23.000Z,11111111-2222-3333-4444-555555555555,198.51.100.24,58231,public-https-listener,AzureDiagnostics,/subscriptions/1/resourceGroups/test/providers/Microsoft.Network/applicationGateways/appgw\n"""
+    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleId_s,ruleName_s,action_s,details_message_s,hostname_s,policyId_s,policyScope_s,policyScopeName_s,engine_s,timeStamp_t [UTC],transactionId_g,clientIp_s,clientPort_s,listenerName_s,Type,_ResourceId\n00000000-0000-0000-0000-000000000000,2023-07-30T23:55:35.522Z,/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-appgw/providers/Microsoft.Network/applicationGateways/sample-appgw,ApplicationGatewayFirewallLog,https://shop.contoso.com/login?debug=1,942100,SQLiBlock,Blocked,Detected SQL injection pattern,shop.contoso.com,/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-appgw/providers/Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolicies/sample-policy,Global,Global,Azwaf,2023-07-30T23:54:23.000Z,11111111-2222-3333-4444-555555555555,198.51.100.24,58231,public-https-listener,AzureDiagnostics,/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-appgw/providers/Microsoft.Network/applicationGateways/sample-appgw\n"""
 
 
 @pytest.fixture
 def waf_log_export_afd_csv() -> bytes:
-    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleName_s,action_s,details_matches_s,hostName_s,trackingReference_s,policyMode_s,clientIp_s,clientPort_s,Type,_ResourceId\n8ecf8077-cf51-4820-aadd-14040956f35d,2023-06-27T05:13:01.577Z,/subscriptions/2/resourceGroups/soc-ns/providers/Microsoft.Cdn/profiles/demowasp-prem,FrontDoorWebApplicationFirewallLog,https://demowasp.z01.azurefd.net:443/,RedirectFirefoxUserAgent,Redirect,"[{""matchVariableName"":""HeaderValue:user-agent"",""matchVariableValue"":""rv:109.0""}]",demowasp.z01.azurefd.net,03W+aZAAAAAA,prevention,203.0.113.8,61084,AzureDiagnostics,/subscriptions/2/resourceGroups/soc-ns/providers/Microsoft.Cdn/profiles/demowasp-prem\n"""
+    return b"""TenantId,TimeGenerated [UTC],ResourceId,Category,requestUri_s,ruleName_s,action_s,details_matches_s,hostName_s,trackingReference_s,policyMode_s,clientIp_s,clientPort_s,Type,_ResourceId\n00000000-0000-0000-0000-000000000000,2023-06-27T05:13:01.577Z,/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-frontdoor/providers/Microsoft.Cdn/profiles/sample-frontdoor,FrontDoorWebApplicationFirewallLog,https://sample-frontdoor.example.invalid:443/,RedirectFirefoxUserAgent,Redirect,"[{""matchVariableName"":""HeaderValue:user-agent"",""matchVariableValue"":""rv:109.0""}]",sample-frontdoor.example.invalid,03W+aZAAAAAA,prevention,203.0.113.8,61084,AzureDiagnostics,/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/sample-rg-frontdoor/providers/Microsoft.Cdn/profiles/sample-frontdoor\n"""
 
 
 @pytest.fixture

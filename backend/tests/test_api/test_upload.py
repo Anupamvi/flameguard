@@ -263,8 +263,8 @@ class TestUploadEndpoint:
         async with async_session() as session:
             ruleset = await session.get(RuleSet, ruleset_id)
             assert ruleset is not None
-            assert "a1b2c3d4-e5f6-7890-abcd-ef1234567890" not in ruleset.raw_json
-            assert "rg-prod-networking" not in ruleset.raw_json
+            assert "00000000-0000-0000-0000-000000000000" not in ruleset.raw_json
+            assert "rg-sample-networking" not in ruleset.raw_json
             assert "[redacted-subscription]" in ruleset.raw_json
             assert "[redacted-resource-group]" in ruleset.raw_json
 
@@ -272,7 +272,7 @@ class TestUploadEndpoint:
             rules = result.scalars().all()
             assert rules
             assert all(
-                rule.raw_json and "a1b2c3d4-e5f6-7890-abcd-ef1234567890" not in rule.raw_json
+                rule.raw_json and "00000000-0000-0000-0000-000000000000" not in rule.raw_json
                 for rule in rules
             )
 
