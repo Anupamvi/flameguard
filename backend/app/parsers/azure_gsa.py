@@ -146,7 +146,20 @@ class AzureGSAParser(BaseParser):
                 "destinationhost",
             )
         )
-        return has_identifier and has_action and has_destination
+        if has_identifier and has_action and has_destination:
+            return True
+
+        # Connection-summary records use plain "id" as the connection identifier
+        if (
+            not has_identifier
+            and has_action
+            and has_destination
+            and bool(self._get(fields, "id"))
+            and bool(self._get(fields, "traffictype"))
+        ):
+            return True
+
+        return False
 
     def _is_audit_row(self, fields: dict[str, Any]) -> bool:
         service = self._string(self._get(fields, "loggedbyservice", "service")).lower()
@@ -179,7 +192,7 @@ class AzureGSAParser(BaseParser):
         timestamp = self._string(
             self._get(fields, "activitydatetime", "timegenerated", "timestamp", "date")
         )
-        connection_id = self._string(self._get(fields, "connectionid", "flowcorrelationid"))
+        connection_id = self._string(self._get(fields, "connectionid", "flowcorrelationid")) or self._string(self._get(fields, "id"))
         transaction_id = self._string(self._get(fields, "transactionid"))
         session_id = self._string(self._get(fields, "sessionid"))
         traffic_type = self._string(self._get(fields, "traffictype", "profile", "servicetype"))
@@ -433,11 +446,13 @@ class AzureGSAParser(BaseParser):
         value = self._maybe_json_value(raw_value)
 
         if isinstance(value, dict):
+            user = value.get("user") or {}
+            app = value.get("app") or {}
             for candidate in (
-                value.get("user", {}).get("userPrincipalName"),
-                value.get("user", {}).get("displayName"),
-                value.get("app", {}).get("displayName"),
-                value.get("app", {}).get("servicePrincipalName"),
+                user.get("userPrincipalName"),
+                user.get("displayName"),
+                app.get("displayName"),
+                app.get("servicePrincipalName"),
             ):
                 string_value = self._string(candidate)
                 if string_value:

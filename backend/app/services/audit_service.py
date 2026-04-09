@@ -33,8 +33,11 @@ def _parse_uploaded_payload(raw_content: str, filename: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON: {exc}") from exc
 
+    if isinstance(data, list):
+        return {"records": data}
+
     if not isinstance(data, dict):
-        raise ValueError("Expected a JSON object at the top level")
+        raise ValueError("Expected a JSON object or array at the top level")
 
     return data
 
